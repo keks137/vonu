@@ -97,6 +97,6 @@ int main(int argc, char *argv[])
 
 	if (!linux_build(&cmd))
 		exit(1);
-	if (!linux_mingw_build(&cmd))
-		exit(1);
+	// if (!linux_mingw_build(&cmd))
+	// 	exit(1);
 }
