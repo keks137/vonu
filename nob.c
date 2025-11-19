@@ -6,7 +6,14 @@
 #define BUILD_DIR "build/"
 #define BIN_DIR "bin/"
 
-void append_linux_glfw_flags(Nob_Cmd *cmd)
+void linux_mingw_glfw_flags(Nob_Cmd *cmd)
+{
+	nob_cmd_append(cmd, "-ggdb");
+	nob_cmd_append(cmd, "-DPLATFORM_DESKTOP");
+	nob_cmd_append(cmd, "-I", "./vendor/glfw/include/");
+	nob_cmd_append(cmd, "-lm");
+}
+void linux_glfw_flags(Nob_Cmd *cmd)
 {
 	nob_cmd_append(cmd, "-ggdb");
 	nob_cmd_append(cmd, "-DPLATFORM_DESKTOP");
@@ -15,14 +22,65 @@ void append_linux_glfw_flags(Nob_Cmd *cmd)
 	nob_cmd_append(cmd, "-lm");
 }
 
+bool linux_mingw_build_glfw(Nob_Cmd *cmd)
+{
+	nob_cmd_append(cmd, "x86_64-w64-mingw32-gcc");
+	linux_mingw_glfw_flags(cmd);
+	nob_cmd_append(cmd, "-c");
+	nob_cc_inputs(cmd, "vendor/rglfw.c");
+	nob_cc_output(cmd, BUILD_DIR "rglfwmingw.o");
+
+	if (!nob_cmd_run(cmd))
+		return false;
+	return true;
+}
 bool linux_build_glfw(Nob_Cmd *cmd)
 {
 	nob_cc(cmd);
-	append_linux_glfw_flags(cmd);
+	linux_glfw_flags(cmd);
 	nob_cmd_append(cmd, "-c");
 	nob_cc_inputs(cmd, "vendor/rglfw.c");
 	nob_cc_output(cmd, BUILD_DIR "rglfw.o");
 
+	if (!nob_cmd_run(cmd))
+		return false;
+	return true;
+}
+bool linux_build(Nob_Cmd *cmd)
+{
+	if (!nob_file_exists(BUILD_DIR "rglfw.o")) {
+		if (!linux_build_glfw(cmd))
+			return false;
+	}
+	nob_cc(cmd);
+	nob_cc_flags(cmd);
+
+	linux_glfw_flags(cmd);
+	nob_cc_inputs(cmd, SRC_DIR "main.c");
+	nob_cc_inputs(cmd, BUILD_DIR "rglfw.o");
+	nob_cc_output(cmd, BIN_DIR "vonu");
+	if (!nob_cmd_run(cmd))
+		return false;
+	return true;
+}
+bool linux_mingw_build(Nob_Cmd *cmd)
+{
+	if (!nob_file_exists(BUILD_DIR "rglfwmingw.o")) {
+		if (!linux_mingw_build_glfw(cmd))
+			return false;
+	}
+
+	nob_cmd_append(cmd, "x86_64-w64-mingw32-gcc");
+	// nob_cc(cmd);
+	nob_cc_flags(cmd);
+
+	linux_mingw_glfw_flags(cmd);
+	nob_cc_inputs(cmd, SRC_DIR "main.c");
+	nob_cc_inputs(cmd, BUILD_DIR "rglfwmingw.o");
+	nob_cmd_append(cmd, "-lgdi32");
+	nob_cmd_append(cmd, "-luser32");
+	nob_cmd_append(cmd, "-lshell32");
+	nob_cc_output(cmd, BIN_DIR "vonu.exe");
 	if (!nob_cmd_run(cmd))
 		return false;
 	return true;
@@ -37,15 +95,8 @@ int main(int argc, char *argv[])
 		exit(1);
 	Nob_Cmd cmd = { 0 };
 
-	if (!linux_build_glfw(&cmd))
+	if (!linux_build(&cmd))
 		exit(1);
-
-
-	nob_cc(&cmd);
-	nob_cc_flags(&cmd);
-	append_linux_glfw_flags(&cmd);
-	nob_cc_inputs(&cmd, SRC_DIR "main.c");
-	nob_cc_inputs(&cmd,BUILD_DIR"rglfw.o");
-	nob_cc_output(&cmd, BIN_DIR "vonu");
-	nob_cmd_run(&cmd);
+	if (!linux_mingw_build(&cmd))
+		exit(1);
 }
