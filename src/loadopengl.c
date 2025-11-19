@@ -32,8 +32,18 @@ PFNGLBINDTEXTUREPROC glBindTexture;
 PFNGLTEXIMAGE2DPROC glTexImage2D;
 PFNGLGENERATEMIPMAPPROC glGenerateMipmap;
 PFNGLTEXPARAMETERIPROC glTexParameteri;
+PFNGLGETUNIFORMLOCATIONPROC  glGetUniformLocation;
+PFNGLUNIFORMMATRIX4FVPROC glUniformMatrix4fv;
+PFNGLGETERRORPROC  glGetError;
+PFNGLUNIFORM1IPROC glUniform1i;
+PFNGLACTIVETEXTUREPROC glActiveTexture;
 bool load_gl_functions()
 {
+glActiveTexture = (PFNGLACTIVETEXTUREPROC)glfwGetProcAddress("glActiveTexture");
+glUniform1i = (PFNGLUNIFORM1IPROC)glfwGetProcAddress("glUniform1i");
+glGetError = (PFNGLGETERRORPROC)glfwGetProcAddress("glGetError");
+glUniformMatrix4fv = (PFNGLUNIFORMMATRIX4FVPROC)glfwGetProcAddress("glUniformMatrix4fv");
+glGetUniformLocation = (PFNGLGETUNIFORMLOCATIONPROC)glfwGetProcAddress("glGetUniformLocation");
 glTexParameteri = (PFNGLTEXPARAMETERIPROC)glfwGetProcAddress("glTexParameteri");
 glGenerateMipmap = (PFNGLGENERATEMIPMAPPROC)glfwGetProcAddress("glGenerateMipmap");
 glTexImage2D = (PFNGLTEXIMAGE2DPROC)glfwGetProcAddress("glTexImage2D");

@@ -1,8 +1,10 @@
+#include <GL/glcorearb.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
+#include "../vendor/cglm/cglm.h"
 
 #include "loadopengl.c"
 
@@ -30,7 +32,6 @@ unsigned int indices[] = {
 	0, 1, 3,
 	1, 2, 3
 };
-
 
 void framebuffer_size_callback(GLFWwindow *window, int width, int height)
 {
@@ -96,6 +97,7 @@ bool create_shader_program(unsigned int *shader_program, const char *vertex_shad
 bool load_image(Image *img, const char *path)
 {
 	int width, height, nrChannels;
+	stbi_set_flip_vertically_on_load(true);
 	unsigned char *data = stbi_load(path, &width, &height, &nrChannels, 0);
 	img->width = width;
 	img->height = height;
@@ -109,8 +111,11 @@ bool load_image(Image *img, const char *path)
 
 int main()
 {
+	glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
+	glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
+	glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
 	const int width = 800;
-	const int height = 600;
+	const int height = 800;
 
 	Image imageData = { 0 };
 	if (!load_image(&imageData, "assets/container.jpg"))
@@ -136,10 +141,12 @@ int main()
 	glGenTextures(1, &texture);
 	glBindTexture(GL_TEXTURE_2D, texture);
 
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST_MIPMAP_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	// glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+	// glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 
 	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, imageData.width, imageData.height, 0, GL_RGB, GL_UNSIGNED_BYTE, imageData.data);
 	glGenerateMipmap(GL_TEXTURE_2D);
@@ -175,13 +182,31 @@ int main()
 	glEnableVertexAttribArray(2);
 
 	// glPolygonMode(GL_FRONT_AND_BACK, GL_LINE); //wireframe
+
 	while (!glfwWindowShouldClose(window)) {
+		mat4 trans;
+		glm_mat4_identity(trans);
+		
+		glm_translate(trans, (vec3){0.5f, -0.5f, 0.0f});
+		glm_rotate(trans, (float)glfwGetTime(), (vec3){0.0f, 0.0f, 1.0f});
 		process_input(window);
 
 		glClearColor(0.39f, 0.58f, 0.92f, 1.0f);
 		glClear(GL_COLOR_BUFFER_BIT);
 
 		glUseProgram(shaderProgram);
+
+		unsigned int transformLoc = glGetUniformLocation(shaderProgram, "transform");
+		glUniformMatrix4fv(transformLoc, 1, GL_FALSE, (const float *)trans);
+
+		GLenum err;
+		while ((err = glGetError()) != GL_NO_ERROR) {
+			fprintf(stderr, "OpenGL error: 0x%04X\n", err);
+		}
+
+		glUniform1i(glGetUniformLocation(shaderProgram, "texture1"), 0);
+		glActiveTexture(GL_TEXTURE0);
+
 		glBindTexture(GL_TEXTURE_2D, texture);
 		glBindVertexArray(VAO);
 		// glDrawArrays(GL_TRIANGLES, 0, 3);
