@@ -11,7 +11,6 @@ void linux_mingw_glfw_flags(Nob_Cmd *cmd)
 	nob_cmd_append(cmd, "-ggdb");
 	nob_cmd_append(cmd, "-DPLATFORM_DESKTOP");
 	nob_cmd_append(cmd, "-I", "./vendor/glfw/include/");
-	nob_cmd_append(cmd, "-lm");
 }
 void linux_glfw_flags(Nob_Cmd *cmd)
 {
@@ -75,6 +74,7 @@ bool linux_mingw_build(Nob_Cmd *cmd)
 	nob_cc_flags(cmd);
 
 	linux_mingw_glfw_flags(cmd);
+	nob_cmd_append(cmd, "-static");
 	nob_cc_inputs(cmd, SRC_DIR "main.c");
 	nob_cc_inputs(cmd, BUILD_DIR "rglfwmingw.o");
 	nob_cmd_append(cmd, "-lgdi32");
