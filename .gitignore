@@ -1,0 +1,6 @@
+.cache
+build
+bin
+compile_commands.json
+nob
+nob.old
