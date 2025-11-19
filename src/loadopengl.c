@@ -27,8 +27,18 @@ PFNGLBINDVERTEXARRAYPROC glBindVertexArray;
 PFNGLDRAWARRAYSPROC glDrawArrays;
 PFNGLDRAWELEMENTSPROC glDrawElements;
 PFNGLPOLYGONMODEPROC glPolygonMode;
+PFNGLGENTEXTURESPROC glGenTextures;
+PFNGLBINDTEXTUREPROC glBindTexture;
+PFNGLTEXIMAGE2DPROC glTexImage2D;
+PFNGLGENERATEMIPMAPPROC glGenerateMipmap;
+PFNGLTEXPARAMETERIPROC glTexParameteri;
 bool load_gl_functions()
 {
+glTexParameteri = (PFNGLTEXPARAMETERIPROC)glfwGetProcAddress("glTexParameteri");
+glGenerateMipmap = (PFNGLGENERATEMIPMAPPROC)glfwGetProcAddress("glGenerateMipmap");
+glTexImage2D = (PFNGLTEXIMAGE2DPROC)glfwGetProcAddress("glTexImage2D");
+glBindTexture = (PFNGLBINDTEXTUREPROC)glfwGetProcAddress("glBindTexture");
+glGenTextures = (PFNGLGENTEXTURESPROC)glfwGetProcAddress("glGenTextures");
 glPolygonMode = (PFNGLPOLYGONMODEPROC)glfwGetProcAddress("glPolygonMode");
 glDrawElements = (PFNGLDRAWELEMENTSPROC)glfwGetProcAddress("glDrawElements");
 glDrawArrays = (PFNGLDRAWARRAYSPROC)glfwGetProcAddress("glDrawArrays");

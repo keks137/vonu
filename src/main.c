@@ -1,7 +1,8 @@
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
-
-#define MULTILINE_STR(...) #__VA_ARGS__
+#define STB_IMAGE_IMPLEMENTATION
+#include "stb_image.h"
 
 #include "loadopengl.c"
 
@@ -11,16 +12,25 @@
 const char *vertexShaderSource = (char *)verts_vert1;
 const char *fragmentShaderSource = (char *)frags_frag1;
 
+typedef struct {
+	unsigned char *data;
+	size_t width;
+	size_t height;
+	size_t n_chan;
+
+} Image;
 float vertices[] = {
-	// positions         // colors
-	0.5f, -0.5f, 0.0f, 1.0f, 0.0f, 0.0f, // bottom right
-	-0.5f, -0.5f, 0.0f, 0.0f, 1.0f, 0.0f, // bottom left
-	0.0f, 0.5f, 0.0f, 0.0f, 0.0f, 1.0f // top
+	// positions          // colors           // texture coords
+	0.5f, 0.5f, 0.0f, 1.0f, 0.0f, 0.0f, 1.0f, 1.0f, // top right
+	0.5f, -0.5f, 0.0f, 0.0f, 1.0f, 0.0f, 1.0f, 0.0f, // bottom right
+	-0.5f, -0.5f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, // bottom left
+	-0.5f, 0.5f, 0.0f, 1.0f, 1.0f, 0.0f, 0.0f, 1.0f // top left
 };
 unsigned int indices[] = {
 	0, 1, 3,
 	1, 2, 3
 };
+
 
 void framebuffer_size_callback(GLFWwindow *window, int width, int height)
 {
@@ -50,7 +60,7 @@ bool verify_program(unsigned int program)
 {
 	int success;
 	char infoLog[512];
-	glGetProgramiv(program, GL_COMPILE_STATUS, &success);
+	glGetProgramiv(program, GL_LINK_STATUS, &success);
 	if (!success) {
 		glGetProgramInfoLog(program, 512, NULL, infoLog);
 		fprintf(stderr, "Error: %s", infoLog);
@@ -83,10 +93,29 @@ bool create_shader_program(unsigned int *shader_program, const char *vertex_shad
 	return true;
 }
 
+bool load_image(Image *img, const char *path)
+{
+	int width, height, nrChannels;
+	unsigned char *data = stbi_load(path, &width, &height, &nrChannels, 0);
+	img->width = width;
+	img->height = height;
+	img->n_chan = nrChannels;
+	img->data = data;
+	if (data == NULL)
+		return false;
+
+	return true;
+}
+
 int main()
 {
 	const int width = 800;
 	const int height = 600;
+
+	Image imageData = { 0 };
+	if (!load_image(&imageData, "assets/container.jpg"))
+		exit(1);
+
 	if (!glfwInit()) {
 		exit(1);
 	}
@@ -103,28 +132,47 @@ int main()
 
 	glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
 
+	unsigned int texture;
+	glGenTextures(1, &texture);
+	glBindTexture(GL_TEXTURE_2D, texture);
+
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, imageData.width, imageData.height, 0, GL_RGB, GL_UNSIGNED_BYTE, imageData.data);
+	glGenerateMipmap(GL_TEXTURE_2D);
+	stbi_image_free(imageData.data);
+
 	unsigned int shaderProgram;
 	printf("==vert==:\n%s\n========\n", vertexShaderSource);
 	printf("==frag==:\n%s\n========\n", fragmentShaderSource);
 	if (!create_shader_program(&shaderProgram, vertexShaderSource, fragmentShaderSource))
 		exit(1);
-	unsigned int VBO, VAO;
 
+	unsigned int VBO, VAO, EBO;
 	glGenVertexArrays(1, &VAO);
 	glGenBuffers(1, &VBO);
+	glGenBuffers(1, &EBO);
 
-	// bind the VAO first, then set the VBO and vertex attributes.
 	glBindVertexArray(VAO);
 
 	glBindBuffer(GL_ARRAY_BUFFER, VBO);
 	glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
 
+	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
+	glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STATIC_DRAW);
+
 	// position attribute (location 0)
-	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void *)0);
+	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void *)0);
 	glEnableVertexAttribArray(0);
 	// color attribute (location 1)
-	glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void *)(3 * sizeof(float)));
+	glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void *)(3 * sizeof(float)));
 	glEnableVertexAttribArray(1);
+	// texture attribute (location 2)
+	glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void *)(6 * sizeof(float)));
+	glEnableVertexAttribArray(2);
 
 	// glPolygonMode(GL_FRONT_AND_BACK, GL_LINE); //wireframe
 	while (!glfwWindowShouldClose(window)) {
@@ -134,11 +182,10 @@ int main()
 		glClear(GL_COLOR_BUFFER_BIT);
 
 		glUseProgram(shaderProgram);
+		glBindTexture(GL_TEXTURE_2D, texture);
 		glBindVertexArray(VAO);
-		glDrawArrays(GL_TRIANGLES, 0, 3);
-
-		// glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
-		// glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
+		// glDrawArrays(GL_TRIANGLES, 0, 3);
+		glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
 
 		glfwSwapBuffers(window);
 		glfwPollEvents();
