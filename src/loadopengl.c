@@ -37,8 +37,10 @@ PFNGLUNIFORMMATRIX4FVPROC glUniformMatrix4fv;
 PFNGLGETERRORPROC  glGetError;
 PFNGLUNIFORM1IPROC glUniform1i;
 PFNGLACTIVETEXTUREPROC glActiveTexture;
+PFNGLENABLEPROC glEnable;
 bool load_gl_functions()
 {
+glEnable = (PFNGLENABLEPROC)glfwGetProcAddress("glEnable");
 glActiveTexture = (PFNGLACTIVETEXTUREPROC)glfwGetProcAddress("glActiveTexture");
 glUniform1i = (PFNGLUNIFORM1IPROC)glfwGetProcAddress("glUniform1i");
 glGetError = (PFNGLGETERRORPROC)glfwGetProcAddress("glGetError");

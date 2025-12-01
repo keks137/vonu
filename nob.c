@@ -55,6 +55,9 @@ bool linux_build(Nob_Cmd *cmd)
 	nob_cc_flags(cmd);
 
 	linux_glfw_flags(cmd);
+	// nob_cmd_append(cmd, "-fsanitize=address");
+	// nob_cmd_append(cmd, "-fsanitize=undefined");
+	
 	nob_cc_inputs(cmd, SRC_DIR "main.c");
 	nob_cc_inputs(cmd, BUILD_DIR "rglfw.o");
 	nob_cc_output(cmd, BIN_DIR "vonu");
@@ -97,6 +100,6 @@ int main(int argc, char *argv[])
 
 	if (!linux_build(&cmd))
 		exit(1);
-	if (!linux_mingw_build(&cmd))
-		exit(1);
+	// if (!linux_mingw_build(&cmd))
+	// 	exit(1);
 }
