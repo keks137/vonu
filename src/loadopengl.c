@@ -38,8 +38,12 @@ PFNGLGETERRORPROC  glGetError;
 PFNGLUNIFORM1IPROC glUniform1i;
 PFNGLACTIVETEXTUREPROC glActiveTexture;
 PFNGLENABLEPROC glEnable;
+PFNGLCULLFACEPROC glCullFace;
+PFNGLENABLEPROC glEnable;
 bool load_gl_functions()
 {
+glEnable = (PFNGLENABLEPROC)glfwGetProcAddress("glEnable");
+glCullFace = (PFNGLCULLFACEPROC)glfwGetProcAddress("glCullFace");
 glEnable = (PFNGLENABLEPROC)glfwGetProcAddress("glEnable");
 glActiveTexture = (PFNGLACTIVETEXTUREPROC)glfwGetProcAddress("glActiveTexture");
 glUniform1i = (PFNGLUNIFORM1IPROC)glfwGetProcAddress("glUniform1i");
