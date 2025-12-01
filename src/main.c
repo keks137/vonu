@@ -3,7 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #define STB_IMAGE_IMPLEMENTATION
-#include "stb_image.h"
+#include "../vendor/stb_image.h"
 #include "../vendor/cglm/cglm.h"
 
 #include "loadopengl.c"
@@ -14,6 +14,8 @@
 #define ARRAY_LEN(array) (sizeof(array) / sizeof(array[0]))
 
 float fov = 45.0f;
+float yaw = -90.0f;
+float pitch = 0.0f;
 
 const char *vertexShaderSource = (char *)verts_vert1;
 const char *fragmentShaderSource = (char *)frags_frag1;
@@ -36,6 +38,9 @@ typedef struct {
 vec3 camera_pos = { 0.0f, 0.0f, 3.0f };
 vec3 camera_up = { 0.0f, 1.0f, 0.0f };
 vec3 camera_front = { 0.0f, 0.0f, -1.0f };
+
+float delta_time = 0.0f;
+float last_frame = 0.0f;
 
 vec3 cubePositions[] = {
 	{ 0.0f, 0.0f, 0.0f },
@@ -99,6 +104,41 @@ unsigned int indices[] = {
 	1, 2, 3
 };
 
+float last_x = 400;
+float last_y = 300;
+void mouse_callback(GLFWwindow *window, double xpos, double ypos)
+{
+	static bool first_mouse = true;
+	if (first_mouse) // initially set to true
+	{
+		last_x = xpos;
+		last_y = ypos;
+		first_mouse = false;
+	}
+	float xoffset = xpos - last_x;
+	float yoffset = last_y - ypos;
+	last_x = xpos;
+	last_y = ypos;
+
+	const float sensitivity = 0.1f;
+	xoffset *= sensitivity;
+	yoffset *= sensitivity;
+
+	yaw += xoffset;
+	pitch += yoffset;
+
+	if (pitch > 89.0f)
+		pitch = 89.0f;
+	if (pitch < -89.0f)
+		pitch = -89.0f;
+	vec3 direction = { 0 };
+
+	direction[0] = cos(glm_rad(yaw)) * cos(glm_rad(pitch));
+	direction[1] = sin(glm_rad(pitch));
+	direction[2] = sin(glm_rad(yaw)) * cos(glm_rad(pitch));
+	glm_normalize(direction);
+	glm_vec3_copy(direction, camera_front);
+}
 void framebuffer_size_callback(GLFWwindow *window, int width, int height)
 {
 	(void)window;
@@ -109,7 +149,7 @@ void process_input(GLFWwindow *window)
 {
 	if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
 		glfwSetWindowShouldClose(window, true);
-	const float camera_speed = 0.05f;
+	const float camera_speed = 2.5f * delta_time;
 	if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) {
 		glm_vec3_muladds(camera_front, camera_speed, camera_pos);
 	}
@@ -247,6 +287,9 @@ int main()
 
 	glEnable(GL_DEPTH_TEST);
 
+	glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+	glfwSetCursorPosCallback(window, mouse_callback);
+
 	glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
 
 	unsigned int texture;
@@ -286,17 +329,8 @@ int main()
 	// glPolygonMode(GL_FRONT_AND_BACK, GL_LINE); //wireframe
 
 	// glfwSwapInterval(0); // no vsync
-	bool dofps = false;
-	double prev_time = glfwGetTime();
-	int frame_count = 0;
-	double fps_update_interval = 0.5;
 
 	mat4 view = { 0 };
-
-	// vec3 camera_target = { 0.0f, 0.0f, 0.0f };
-	// vec3 camera_opposite_direction = { 0 };
-	// glm_vec3_sub(camera_pos, camera_target, camera_opposite_direction);
-	// glm_normalize(camera_opposite_direction);
 
 	vec3 up = { 0.0f, 1.0f, 0.0f };
 	// vec3 camera_right = { 0 };
@@ -306,18 +340,10 @@ int main()
 	// glm_cross(camera_opposite_direction, camera_right, camera_up);
 
 	while (!glfwWindowShouldClose(window)) {
-		double current_time = glfwGetTime();
-		frame_count++;
+		float current_frame = glfwGetTime();
+		delta_time = current_frame - last_frame;
+		last_frame = current_frame;
 
-		if (current_time - prev_time >= fps_update_interval) {
-			double fps = frame_count / (current_time - prev_time);
-
-			frame_count = 0;
-			prev_time = current_time;
-			if (dofps) {
-				printf("FPS: %.1f\n", fps);
-			}
-		}
 		// mat4 trans = { 0 };
 		// glm_mat4_identity(trans);
 
