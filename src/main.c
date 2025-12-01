@@ -1,5 +1,6 @@
 #include <GL/glcorearb.h>
 #include <stddef.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #define STB_IMAGE_IMPLEMENTATION
@@ -10,6 +11,59 @@
 
 #include "verts/vert1.c"
 #include "frags/frag1.c"
+
+typedef enum {
+	BLOCKTYPE_AIR,
+	BLOCKTYPE_GRASS
+} BLOCKTYPE;
+
+#define CHUNK_TOTAL_X 32
+#define CHUNK_TOTAL_Y 32
+#define CHUNK_TOTAL_Z 32
+#define CHUNK_TOTAL_BLOCKS (CHUNK_TOTAL_X * CHUNK_TOTAL_Y * CHUNK_TOTAL_Z)
+const size_t CHUNK_STRIDE_Y = (CHUNK_TOTAL_X * CHUNK_TOTAL_Y);
+const size_t CHUNK_STRIDE_Z = (CHUNK_TOTAL_X);
+
+typedef struct {
+	BLOCKTYPE type;
+	bool transparent;
+} Block;
+typedef struct {
+	size_t x;
+	size_t y;
+	size_t z;
+} BlockPos;
+
+typedef struct {
+	Block *data;
+	vec3 pos;
+} Chunk; // INFO: stored as xzy for reasons I guess
+
+Chunk chunk_callocrash()
+{
+	Chunk chunk = { 0 };
+	chunk.data = calloc(CHUNK_TOTAL_BLOCKS, sizeof(Block));
+	if (chunk.data == NULL) {
+		fprintf(stderr, "Buy more ram for more chunks bozo\n");
+		abort();
+	}
+	return chunk;
+}
+
+BlockPos chunk_index_to_blockpos(size_t index)
+{
+	BlockPos pos = { 0 };
+	pos.x = index % CHUNK_TOTAL_X;
+	index /= CHUNK_TOTAL_X;
+	pos.z = index % CHUNK_TOTAL_Z;
+	pos.y = index / CHUNK_TOTAL_Z;
+	return pos;
+}
+
+Block *chunk_xyz_at(Chunk *chunk, int x, int y, int z)
+{
+	return &chunk->data[y * CHUNK_STRIDE_Y + z * CHUNK_STRIDE_Z + x];
+}
 
 #define ARRAY_LEN(array) (sizeof(array) / sizeof(array[0]))
 
@@ -35,7 +89,7 @@ typedef struct {
 // 	-0.5f, 0.5f, 0.0f, 1.0f, 1.0f, 0.0f, 0.0f, 1.0f // top left
 // };
 
-vec3 camera_pos = { 0.0f, 0.0f, 3.0f };
+vec3 camera_pos = { 0.0f, 0.0f, 0.0f };
 vec3 camera_up = { 0.0f, 1.0f, 0.0f };
 vec3 camera_front = { 0.0f, 0.0f, -1.0f };
 
@@ -150,6 +204,12 @@ void process_input(GLFWwindow *window)
 	if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
 		glfwSetWindowShouldClose(window, true);
 	const float camera_speed = 2.5f * delta_time;
+	if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS) {
+		camera_pos[1] += camera_speed;
+	}
+	if (glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS) {
+		camera_pos[1] -= camera_speed;
+	}
 	if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) {
 		glm_vec3_muladds(camera_front, camera_speed, camera_pos);
 	}
@@ -259,6 +319,13 @@ void vao_attributes_color(unsigned int VAO)
 	glEnableVertexAttribArray(2);
 }
 
+void print_image_info(Image *image)
+{
+	printf("height: %zu\n", image->height);
+	printf("width: %zu\n", image->width);
+	printf("n_chan: %zu\n", image->n_chan);
+}
+
 int main()
 {
 	glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
@@ -268,8 +335,9 @@ int main()
 	const int height = 600;
 
 	Image imageData = { 0 };
-	if (!load_image(&imageData, "assets/container.jpg"))
+	if (!load_image(&imageData, "assets/grass.png"))
 		exit(1);
+	print_image_info(&imageData);
 
 	if (!glfwInit()) {
 		exit(1);
@@ -303,7 +371,18 @@ int main()
 	// glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
 	// glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 
-	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, imageData.width, imageData.height, 0, GL_RGB, GL_UNSIGNED_BYTE, imageData.data);
+	GLenum format;
+	if (imageData.n_chan == 3) {
+		format = GL_RGB;
+	} else if (imageData.n_chan == 4) {
+		format = GL_RGBA;
+	} else {
+		// Handle other cases or default to RGB
+		format = GL_RGB;
+	}
+
+	glTexImage2D(GL_TEXTURE_2D, 0, format, imageData.width, imageData.height, 0, format, GL_UNSIGNED_BYTE, imageData.data);
+
 	glGenerateMipmap(GL_TEXTURE_2D);
 	stbi_image_free(imageData.data);
 
@@ -339,6 +418,10 @@ int main()
 
 	// glm_cross(camera_opposite_direction, camera_right, camera_up);
 
+	Chunk chunk = chunk_callocrash();
+	for (size_t i = 0; i < 200; i++) {
+		chunk.data[i].type = BLOCKTYPE_GRASS;
+	}
 	while (!glfwWindowShouldClose(window)) {
 		float current_frame = glfwGetTime();
 		delta_time = current_frame - last_frame;
@@ -399,17 +482,23 @@ int main()
 		// glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
 
 		glBindVertexArray(VAO);
-		for (size_t i = 0; i < ARRAY_LEN(cubePositions); i++) {
-			mat4 model = { 0 };
-			glm_mat4_identity(model);
-			glm_translate(model, cubePositions[i]);
+		for (size_t i = 0; i < CHUNK_TOTAL_BLOCKS; i++) {
+			if (chunk.data[i].type == BLOCKTYPE_GRASS) {
+				mat4 model = { 0 };
+				glm_mat4_identity(model);
 
-			float angle = 20.0f * i;
-			glm_rotate(model, glm_rad(angle), (vec3){ 1.0f, 0.3f, 0.5f });
+				BlockPos pos = chunk_index_to_blockpos(i);
 
-			int modelLoc = glGetUniformLocation(shaderProgram, "model");
-			glUniformMatrix4fv(modelLoc, 1, GL_FALSE, (const float *)model);
-			glDrawArrays(GL_TRIANGLES, 0, 36);
+				vec3 worldpos = { chunk.pos[0] + pos.x, chunk.pos[1] + pos.y, chunk.pos[2] + pos.z };
+				glm_translate(model, worldpos);
+
+				// float angle = 20.0f * i;
+				// glm_rotate(model, glm_rad(angle), (vec3){ 1.0f, 0.3f, 0.5f });
+
+				int modelLoc = glGetUniformLocation(shaderProgram, "model");
+				glUniformMatrix4fv(modelLoc, 1, GL_FALSE, (const float *)model);
+				glDrawArrays(GL_TRIANGLES, 0, 36);
+			}
 		}
 
 		glfwSwapBuffers(window);
