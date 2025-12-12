@@ -3,6 +3,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #define STB_IMAGE_IMPLEMENTATION
 #include "../vendor/stb_image.h"
 #include "../vendor/cglm/cglm.h"
@@ -22,13 +23,46 @@ typedef enum {
 #define CHUNK_TOTAL_Y 32
 #define CHUNK_TOTAL_Z 32
 #define CHUNK_TOTAL_BLOCKS (CHUNK_TOTAL_X * CHUNK_TOTAL_Y * CHUNK_TOTAL_Z)
+
+#define FLOATS_PER_VERTEX 5
+#define VERTICES_PER_FACE 6
+#define FACES_PER_CUBE 6
+
+typedef enum {
+	FACE_BACK = 0,
+	FACE_FRONT,
+	FACE_LEFT,
+	FACE_RIGHT,
+	FACE_BOTTOM,
+	FACE_TOP
+} CubeFace;
+
+typedef struct {
+	float vertices[VERTICES_PER_FACE][FLOATS_PER_VERTEX];
+} FaceVertices;
+
+#define CHUNK_TOTAL_VERTICES (CHUNK_TOTAL_BLOCKS * FACES_PER_CUBE * FLOATS_PER_VERTEX * VERTICES_PER_FACE)
+
+typedef struct {
+	float *data;
+	size_t fill;
+} TmpChunkVerts;
+static float tmp_chunk_verts_data[CHUNK_TOTAL_VERTICES];
+TmpChunkVerts tmp_chunk_verts = { .data = tmp_chunk_verts_data, .fill = 0 };
+
+void clear_tmp_chunk_verts()
+{
+	memset(tmp_chunk_verts.data, 0, sizeof(float) * tmp_chunk_verts.fill);
+	tmp_chunk_verts.fill = 0;
+}
+
 const size_t CHUNK_STRIDE_Y = (CHUNK_TOTAL_X * CHUNK_TOTAL_Y);
 const size_t CHUNK_STRIDE_Z = (CHUNK_TOTAL_X);
 
 float movement_speed = 5.0f;
 typedef struct {
 	BLOCKTYPE type;
-	bool transparent;
+	bool obstructing;
 } Block;
 typedef struct {
 	size_t x;
@@ -39,6 +73,10 @@ typedef struct {
 typedef struct {
 	Block *data;
 	vec3 pos;
+	unsigned int VAO;
+	unsigned int VBO;
+	size_t vertex_count;
+	bool up_to_date;
 } Chunk; // INFO: stored as xzy for reasons I guess
 
 Chunk chunk_callocrash()
@@ -98,53 +136,55 @@ vec3 camera_front = { 0.0f, 0.0f, -1.0f };
 float delta_time = 0.0f;
 float last_frame = 0.0f;
 
-float vertices[] = {
+FaceVertices cube_vertices[] = {
 	//BACK
-	0.5f, 0.5f, -0.5f, 1.0f, 1.0f,
-	0.5f, -0.5f, -0.5f, 1.0f, 0.0f,
-	-0.5f, -0.5f, -0.5f, 0.0f, 0.0f,
-	-0.5f, -0.5f, -0.5f, 0.0f, 0.0f,
-	-0.5f, 0.5f, -0.5f, 0.0f, 1.0f,
-	0.5f, 0.5f, -0.5f, 1.0f, 1.0f,
-
-	//FRONT
-	-0.5f, -0.5f, 0.5f, 0.0f, 0.0f,
-	0.5f, -0.5f, 0.5f, 1.0f, 0.0f,
-	0.5f, 0.5f, 0.5f, 1.0f, 1.0f,
-	0.5f, 0.5f, 0.5f, 1.0f, 1.0f,
-	-0.5f, 0.5f, 0.5f, 0.0f, 1.0f,
-	-0.5f, -0.5f, 0.5f, 0.0f, 0.0f,
-
-	//LEFT
-	-0.5f, 0.5f, 0.5f, 1.0f, 0.0f,
-	-0.5f, 0.5f, -0.5f, 1.0f, 1.0f,
-	-0.5f, -0.5f, -0.5f, 0.0f, 1.0f,
-	-0.5f, -0.5f, -0.5f, 0.0f, 1.0f,
-	-0.5f, -0.5f, 0.5f, 0.0f, 0.0f,
-	-0.5f, 0.5f, 0.5f, 1.0f, 0.0f,
-
-	//RIGHT
-	0.5f, -0.5f, -0.5f, 0.0f, 1.0f,
-	0.5f, 0.5f, -0.5f, 1.0f, 1.0f,
-	0.5f, 0.5f, 0.5f, 1.0f, 0.0f,
-	0.5f, 0.5f, 0.5f, 1.0f, 0.0f,
-	0.5f, -0.5f, 0.5f, 0.0f, 0.0f,
-	0.5f, -0.5f, -0.5f, 0.0f, 1.0f,
-
-	-0.5f, -0.5f, -0.5f, 0.0f, 1.0f,
-	0.5f, -0.5f, -0.5f, 1.0f, 1.0f,
-	0.5f, -0.5f, 0.5f, 1.0f, 0.0f,
-	0.5f, -0.5f, 0.5f, 1.0f, 0.0f,
-	-0.5f, -0.5f, 0.5f, 0.0f, 0.0f,
-	-0.5f, -0.5f, -0.5f, 0.0f, 1.0f,
-
-	//TOP
-	0.5f, 0.5f, 0.5f, 1.0f, 0.0f,
-	0.5f, 0.5f, -0.5f, 1.0f, 1.0f,
-	-0.5f, 0.5f, -0.5f, 0.0f, 1.0f,
-	-0.5f, 0.5f, -0.5f, 0.0f, 1.0f,
-	-0.5f, 0.5f, 0.5f, 0.0f, 0.0f,
-	0.5f, 0.5f, 0.5f, 1.0f, 0.0f
+	{
+		{ { 0.5f, 0.5f, -0.5f, 1.0f, 1.0f },
+		  { 0.5f, -0.5f, -0.5f, 1.0f, 0.0f },
+		  { -0.5f, -0.5f, -0.5f, 0.0f, 0.0f },
+		  { -0.5f, -0.5f, -0.5f, 0.0f, 0.0f },
+		  { -0.5f, 0.5f, -0.5f, 0.0f, 1.0f },
+		  { 0.5f, 0.5f, -0.5f, 1.0f, 1.0f } } },
+	// FRONT
+	{
+		{ { -0.5f, -0.5f, 0.5f, 0.0f, 0.0f },
+		  { 0.5f, -0.5f, 0.5f, 1.0f, 0.0f },
+		  { 0.5f, 0.5f, 0.5f, 1.0f, 1.0f },
+		  { 0.5f, 0.5f, 0.5f, 1.0f, 1.0f },
+		  { -0.5f, 0.5f, 0.5f, 0.0f, 1.0f },
+		  { -0.5f, -0.5f, 0.5f, 0.0f, 0.0f } } },
+	// LEFT
+	{
+		{ { -0.5f, 0.5f, 0.5f, 1.0f, 0.0f },
+		  { -0.5f, 0.5f, -0.5f, 1.0f, 1.0f },
+		  { -0.5f, -0.5f, -0.5f, 0.0f, 1.0f },
+		  { -0.5f, -0.5f, -0.5f, 0.0f, 1.0f },
+		  { -0.5f, -0.5f, 0.5f, 0.0f, 0.0f },
+		  { -0.5f, 0.5f, 0.5f, 1.0f, 0.0f } } },
+	// RIGHT
+	{
+		{ { 0.5f, -0.5f, -0.5f, 0.0f, 1.0f },
+		  { 0.5f, 0.5f, -0.5f, 1.0f, 1.0f },
+		  { 0.5f, 0.5f, 0.5f, 1.0f, 0.0f },
+		  { 0.5f, 0.5f, 0.5f, 1.0f, 0.0f },
+		  { 0.5f, -0.5f, 0.5f, 0.0f, 0.0f },
+		  { 0.5f, -0.5f, -0.5f, 0.0f, 1.0f } } },
+	// BOTTOM
+	{
+		{ { -0.5f, -0.5f, -0.5f, 0.0f, 1.0f },
+		  { 0.5f, -0.5f, -0.5f, 1.0f, 1.0f },
+		  { 0.5f, -0.5f, 0.5f, 1.0f, 0.0f },
+		  { 0.5f, -0.5f, 0.5f, 1.0f, 0.0f },
+		  { -0.5f, -0.5f, 0.5f, 0.0f, 0.0f },
+		  { -0.5f, -0.5f, -0.5f, 0.0f, 1.0f } } },
+	// TOP
+	{
+		{ { 0.5f, 0.5f, 0.5f, 1.0f, 0.0f },
+		  { 0.5f, 0.5f, -0.5f, 1.0f, 1.0f },
+		  { -0.5f, 0.5f, -0.5f, 0.0f, 1.0f },
+		  { -0.5f, 0.5f, -0.5f, 0.0f, 1.0f },
+		  { -0.5f, 0.5f, 0.5f, 0.0f, 0.0f },
+		  { 0.5f, 0.5f, 0.5f, 1.0f, 0.0f } } }
 };
 
 unsigned int indices[] = {
@@ -364,6 +404,44 @@ void vec3_assign(vec3 v, float x, float y, float z)
 	v[2] = z;
 }
 
+void add_block_faces_to_buffer(Chunk *chunk, int x, int y, int z, BLOCKTYPE type)
+{
+	// Check each direction for occlusion
+	CubeFace faces_to_add[6];
+	int face_count = 0;
+
+	// Simple neighbor checks (would need bounds checking)
+	if (y == CHUNK_TOTAL_Y - 1 || chunk_xyz_at(chunk, x, y + 1, z)->type == BLOCKTYPE_AIR)
+		faces_to_add[face_count++] = FACE_TOP;
+	// ... check other 5 faces
+
+	for (int i = 0; i < face_count; i++) {
+		// add_face_to_buffer(x, y, z, faces_to_add[i], type); // TODO:implement
+	}
+}
+void chunk_generate_mesh(Chunk *chunk)
+{
+	clear_tmp_chunk_verts();
+	for (size_t y = 0; y < CHUNK_TOTAL_Y; y++) {
+		for (size_t z = 0; z < CHUNK_TOTAL_Z; z++) {
+			for (size_t x = 0; x < CHUNK_TOTAL_X; x++) {
+				Block *block = chunk_xyz_at(chunk, x, y, z);
+				if (!block->obstructing)
+					continue;
+				BlockPos a;
+				//add_block_faces_to_buffer(chunk, x, y, z, block->type); // TODO:implement
+			}
+		}
+	}
+	glBindBuffer(GL_ARRAY_BUFFER, chunk->VBO);
+	glBufferData(GL_ARRAY_BUFFER,
+		     tmp_chunk_verts.fill * sizeof(float),
+		     tmp_chunk_verts.data,
+		     GL_STATIC_DRAW);
+	chunk->vertex_count = tmp_chunk_verts.fill / FLOATS_PER_VERTEX;
+	chunk->up_to_date = true;
+}
+
 int main()
 {
 	glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
@@ -435,7 +513,7 @@ int main()
 	glGenBuffers(1, &EBO);
 
 	glBindBuffer(GL_ARRAY_BUFFER, VBO);
-	glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
+	glBufferData(GL_ARRAY_BUFFER, sizeof(cube_vertices), cube_vertices, GL_STATIC_DRAW);
 
 	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
 	glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STATIC_DRAW);
@@ -454,10 +532,18 @@ int main()
 	vec3_assign(chunk2.pos, 20.0f, 20.0f, 20.0f);
 	for (size_t i = 0; i < 2000; i++) {
 		chunk.data[i].type = BLOCKTYPE_GRASS;
+		chunk2.data[i].obstructing = true;
 	}
 	for (size_t i = 0; i < 400; i++) {
 		chunk2.data[i].type = BLOCKTYPE_GRASS;
+		chunk2.data[i].obstructing = true;
 	}
+
+	glUseProgram(shaderProgram);
+	glUniform1i(glGetUniformLocation(shaderProgram, "texture1"), 0);
+	glActiveTexture(GL_TEXTURE0);
+	glBindTexture(GL_TEXTURE_2D, texture);
+
 	while (!glfwWindowShouldClose(window)) {
 		float current_frame = glfwGetTime();
 		delta_time = current_frame - last_frame;
@@ -478,8 +564,6 @@ int main()
 		glClearColor(0.39f, 0.58f, 0.92f, 1.0f);
 		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-		glUseProgram(shaderProgram);
-
 		int viewLoc = glGetUniformLocation(shaderProgram, "view");
 		glUniformMatrix4fv(viewLoc, 1, GL_FALSE, (const float *)view);
 
@@ -490,11 +574,6 @@ int main()
 		while ((err = glGetError()) != GL_NO_ERROR) {
 			fprintf(stderr, "OpenGL error: 0x%04X\n", err);
 		}
-
-		glUniform1i(glGetUniformLocation(shaderProgram, "texture1"), 0);
-		glActiveTexture(GL_TEXTURE0);
-
-		glBindTexture(GL_TEXTURE_2D, texture);
 
 		render_chunk(&chunk, VAO, shaderProgram);
 		render_chunk(&chunk2, VAO, shaderProgram);
