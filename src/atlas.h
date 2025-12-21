@@ -1,7 +1,7 @@
 #ifndef TEXTURE_ATLAS_H
 #define TEXTURE_ATLAS_H
 
-#include <GL/gl.h>
+#include "loadopengl.h"
 #include "image.h"
 #include <stdbool.h>
 #include <stddef.h>

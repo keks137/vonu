@@ -6,13 +6,12 @@
 #include "vassert.h"
 #include "logs.h"
 #include <time.h>
+#include "loadopengl.h"
 #include <unistd.h>
 #define STB_IMAGE_IMPLEMENTATION
 #include "../vendor/stb_image.h"
 #include "../vendor/cglm/cglm.h"
 #include "image.h"
-
-#include "loadopengl.c"
 
 #include "verts/vert1.c"
 #include "frags/frag1.c"
@@ -158,7 +157,7 @@ unsigned int indices[] = {
 float last_x = 400;
 float last_y = 300;
 typedef struct {
-	bool reset_mouse
+	bool reset_mouse;
 } MouseState;
 MouseState mouse_state;
 
@@ -223,6 +222,7 @@ void window_focus_callback(GLFWwindow *window, int focused)
 }
 void mouse_button_callback(GLFWwindow *window, int button, int action, int mods)
 {
+	(void)mods;
 	if (paused) {
 		if (button == GLFW_MOUSE_BUTTON_LEFT && action == GLFW_PRESS) {
 			set_paused(window, false);
@@ -238,9 +238,6 @@ void mouse_button_callback(GLFWwindow *window, int button, int action, int mods)
 
 void process_input(GLFWwindow *window)
 {
-	int focused = glfwGetWindowAttrib(window, GLFW_FOCUSED);
-	int iconified = glfwGetWindowAttrib(window, GLFW_ICONIFIED);
-
 	static bool escapeKeyPressedLastFrame = false;
 
 	bool escapeKeyPressedThisFrame = glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS;
@@ -517,7 +514,6 @@ int main()
 	}
 
 	glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
-	VINFO("Hi!");
 	glfwSetWindowFocusCallback(window, window_focus_callback);
 	glfwSetMouseButtonCallback(window, mouse_button_callback);
 
