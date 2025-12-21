@@ -17,6 +17,31 @@
 #include "verts/vert1.c"
 #include "frags/frag1.c"
 
+typedef enum {
+	BLOCKTYPE_AIR,
+	BLOCKTYPE_GRASS,
+	BLOCKTYPE_STONE,
+} BLOCKTYPE;
+typedef struct {
+	BLOCKTYPE type;
+	bool obstructing;
+} Block;
+typedef struct {
+	size_t x;
+	size_t y;
+	size_t z;
+} BlockPos;
+
+typedef struct {
+	Block *data;
+	vec3 pos;
+	unsigned int VAO;
+	unsigned int VBO;
+	size_t vertex_count;
+	bool contains_blocks;
+	bool up_to_date;
+} Chunk;
+
 typedef struct {
 	vec3 pos;
 	vec3 front;
@@ -26,19 +51,23 @@ typedef struct {
 	float fov;
 } Camera;
 
+#define RENDER_DISTANCE 4
+#define MAX_LOADED_CHUNKS (2 * RENDER_DISTANCE + 1) * (2 * RENDER_DISTANCE + 1) * (2 * RENDER_DISTANCE + 1)
+
 typedef struct {
+	Chunk chunks[MAX_LOADED_CHUNKS];
+	size_t chunk_count;
+	size_t player_chunk;
+} World;
+
+typedef struct {
+	World world;
 	Camera camera;
 	float delta_time;
 	float last_frame;
 	bool paused;
 } GameState;
 GameState game_state = { 0 };
-
-typedef enum {
-	BLOCKTYPE_AIR,
-	BLOCKTYPE_GRASS,
-	BLOCKTYPE_STONE,
-} BLOCKTYPE;
 
 #define CHUNK_TOTAL_X 32
 #define CHUNK_TOTAL_Y 32
@@ -99,24 +128,6 @@ const size_t CHUNK_STRIDE_Z = (CHUNK_TOTAL_X * CHUNK_TOTAL_Y);
 #define CHUNK_INDEX(x, y, z) ((x) + (y) * CHUNK_STRIDE_Y + (z) * CHUNK_STRIDE_Z)
 
 float movement_speed = 5.0f;
-typedef struct {
-	BLOCKTYPE type;
-	bool obstructing;
-} Block;
-typedef struct {
-	size_t x;
-	size_t y;
-	size_t z;
-} BlockPos;
-
-typedef struct {
-	Block *data;
-	vec3 pos;
-	unsigned int VAO;
-	unsigned int VBO;
-	size_t vertex_count;
-	bool up_to_date;
-} Chunk;
 
 void vao_attributes_no_color(unsigned int VAO)
 {
@@ -168,14 +179,6 @@ Block *chunk_xyz_at(Chunk *chunk, int x, int y, int z)
 
 const char *vertexShaderSource = (char *)verts_vert1;
 const char *fragmentShaderSource = (char *)frags_frag1;
-
-// float vertices[] = {
-// 	// positions          // colors           // texture coords
-// 	0.5f, 0.5f, 0.0f, 1.0f, 0.0f, 0.0f, 1.0f, 1.0f, // top right
-// 	0.5f, -0.5f, 0.0f, 0.0f, 1.0f, 0.0f, 1.0f, 0.0f, // bottom right
-// 	-0.5f, -0.5f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, // bottom left
-// 	-0.5f, 0.5f, 0.0f, 1.0f, 1.0f, 0.0f, 0.0f, 1.0f // top left
-// };
 
 FaceVertices cube_vertices[] = {
 	//BACK
@@ -437,25 +440,11 @@ bool load_image(Image *img, const char *path)
 	return true;
 }
 
-void vao_attributes_color(unsigned int VAO)
-{
-	glBindVertexArray(VAO);
-
-	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void *)0);
-	glEnableVertexAttribArray(0);
-
-	glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void *)(3 * sizeof(float)));
-	glEnableVertexAttribArray(1);
-
-	glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void *)(6 * sizeof(float)));
-	glEnableVertexAttribArray(2);
-}
-
 void print_image_info(Image *image)
 {
-	printf("height: %zu\n", image->height);
-	printf("width: %zu\n", image->width);
-	printf("n_chan: %zu\n", image->n_chan);
+	VINFO("height: %zu", image->height);
+	VINFO("width: %zu", image->width);
+	VINFO("n_chan: %zu", image->n_chan);
 }
 
 void chunk_render(Chunk *chunk, unsigned int shaderProgram)
@@ -547,6 +536,35 @@ void chunk_generate_mesh(Chunk *chunk, TmpChunkVerts *tmp_chunk_verts)
 	chunk->vertex_count = tmp_chunk_verts->fill / FLOATS_PER_VERTEX;
 	chunk->up_to_date = true;
 }
+void chunk_generate_terrain(Chunk *chunk)
+{
+	for (size_t i = 0; i < CHUNK_TOTAL_BLOCKS; i++) {
+		BlockPos block = chunk_index_to_blockpos(i);
+		if (block.y < 5) {
+			chunk->data[i].type = BLOCKTYPE_GRASS;
+			chunk->data[i].obstructing = true;
+		}
+	}
+}
+
+void world_init(World *world)
+{
+	for (size_t i = 0; i < MAX_LOADED_CHUNKS; i++) {
+		Chunk chunk = chunk_callocrash();
+		chunk.pos[0] =  CHUNK_TOTAL_X;
+		chunk.pos[1] = 0;
+		chunk.pos[2] = 0;
+		chunk_generate_terrain(&chunk);
+		world->chunks[i] = chunk;
+	}
+}
+void world_draw(World *world, TmpChunkVerts *tmp_chunk_verts, unsigned int shader_program)
+{
+	for (size_t i = 0; i < MAX_LOADED_CHUNKS; i++) {
+		chunk_generate_mesh(&world->chunks[i], tmp_chunk_verts);
+		chunk_render(&world->chunks[i], shader_program);
+	}
+}
 
 int main()
 {
@@ -557,10 +575,9 @@ int main()
 	const int height = 600;
 
 	Image imageData = { 0 };
-	if (!load_image(&imageData, "assets/grass.png"))
+	if (!load_image(&imageData, "assets/grass_side.png"))
 		exit(1);
-	print_image_info(&imageData);
-
+	// print_image_info(&imageData);
 	if (!glfwInit()) {
 		exit(1);
 	}
@@ -607,16 +624,16 @@ int main()
 	stbi_image_free(imageData.data);
 
 	unsigned int shaderProgram;
-	printf("==vert==:\n%s\n========\n", vertexShaderSource);
-	printf("==frag==:\n%s\n========\n", fragmentShaderSource);
+	// VINFO("==vert==:\n%s\n========", vertexShaderSource);
+	// VINFO("==frag==:\n%s\n========", fragmentShaderSource);
 	if (!create_shader_program(&shaderProgram, vertexShaderSource, fragmentShaderSource))
 		exit(1);
 
 	game_state.camera = (Camera){
 		.fov = 90.0f,
-		.yaw = -90.0f,
+		.yaw = -00.0f,
 		.pitch = 0.0f,
-		.pos = { 0.0f, 0.0f, 0.0f },
+		.pos = { 0.0f, 10.0f, 0.0f },
 		.up = { 0.0f, 1.0f, 0.0f },
 		.front = { 0.0f, 0.0f, -1.0f },
 	};
@@ -641,21 +658,7 @@ int main()
 
 	// glfwSwapInterval(0); // no vsync
 
-	Chunk chunk = chunk_callocrash();
-	vec3_assign(chunk.pos, 0.0f, 0.0f, 0.0f);
-	Chunk chunk2 = chunk_callocrash();
-	vec3_assign(chunk2.pos, 20.0f, 20.0f, 20.0f);
-	for (size_t i = 0; i < CHUNK_TOTAL_BLOCKS; i++) {
-		BlockPos block = chunk_index_to_blockpos(i);
-		if (block.y <= 5) {
-			chunk.data[i].type = BLOCKTYPE_GRASS;
-			chunk.data[i].obstructing = true;
-		}
-	}
-	for (size_t i = 0; i < 400; i++) {
-		chunk2.data[i].type = BLOCKTYPE_GRASS;
-		chunk2.data[i].obstructing = true;
-	}
+	world_init(&game_state.world);
 
 	glUseProgram(shaderProgram);
 	glUniform1i(glGetUniformLocation(shaderProgram, "texture1"), 0);
@@ -705,15 +708,7 @@ int main()
 			VERROR("OpenGL error: 0x%04X", err);
 		}
 
-		glUniform1i(glGetUniformLocation(shaderProgram, "texture1"), 0);
-		glActiveTexture(GL_TEXTURE0);
-
-		glBindTexture(GL_TEXTURE_2D, texture);
-
-		chunk_generate_mesh(&chunk, &tmp_chunk_verts);
-		chunk_render(&chunk, shaderProgram);
-		chunk_generate_mesh(&chunk2, &tmp_chunk_verts);
-		chunk_render(&chunk2, shaderProgram);
+		world_draw(&game_state.world, &tmp_chunk_verts, shaderProgram);
 
 		glfwSwapBuffers(window);
 		glfwPollEvents();
