@@ -13,9 +13,9 @@ static const char *level_strings[6] = { "[FATAL]: ", "[ERROR]: ", "[WARN]: ", "[
 void log_assertion_failure(const char *expression, const char *message, const char *file, int32_t line)
 {
 	if (message == NULL) {
-		log_msgn(LOG_LEVEL_FATAL, "Assertion Failure: %s, file: %s, line %d", expression, file, line);
+		log_msgn(LOG_LEVEL_FATAL, "%s:%d: Assertion '%s' failed", file, line, expression);
 	} else {
-		log_msgn(LOG_LEVEL_FATAL, "Assertion Failure: %s, message: '%s', file: %s, line %d", expression, message, file, line);
+		log_msgn(LOG_LEVEL_FATAL, "%s:%d: Assertion '%s' failed: '%s'", file, line, expression, message);
 	}
 }
 void log_msgn(LOG_LEVEL level, const char *message, ...)

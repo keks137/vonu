@@ -1,4 +1,5 @@
 #include <GL/glcorearb.h>
+#include <assert.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -42,6 +43,24 @@ typedef enum {
 	FACE_TOP
 } CubeFace;
 
+// static const vec3 face_normals[6] = {
+// 	{ 0, 0, -1 }, // BACK
+// 	{ 0, 0, 1 }, // FRONT
+// 	{ -1, 0, 0 }, // LEFT
+// 	{ 1, 0, 0 }, // RIGHT
+// 	{ 0, -1, 0 }, // BOTTOM
+// 	{ 0, 1, 0 } // TOP
+// };
+
+static const vec3 face_offsets[6] = {
+	{ 0, 0, -1 }, // BACK
+	{ 0, 0, 1 }, // FRONT
+	{ -1, 0, 0 }, // LEFT
+	{ 1, 0, 0 }, // RIGHT
+	{ 0, -1, 0 }, // BOTTOM
+	{ 0, 1, 0 } // TOP
+};
+
 typedef struct {
 	float vertices[VERTICES_PER_FACE][FLOATS_PER_VERTEX];
 } FaceVertices;
@@ -52,13 +71,11 @@ typedef struct {
 	float *data;
 	size_t fill;
 } TmpChunkVerts;
-static float tmp_chunk_verts_data[CHUNK_TOTAL_VERTICES];
-TmpChunkVerts tmp_chunk_verts = { .data = tmp_chunk_verts_data, .fill = 0 };
 
-void clear_tmp_chunk_verts()
+void clear_tmp_chunk_verts(TmpChunkVerts *tmp_chunk_verts)
 {
-	memset(tmp_chunk_verts.data, 0, sizeof(float) * tmp_chunk_verts.fill);
-	tmp_chunk_verts.fill = 0;
+	memset(tmp_chunk_verts->data, 0, sizeof(float) * tmp_chunk_verts->fill);
+	tmp_chunk_verts->fill = 0;
 }
 
 const size_t CHUNK_STRIDE_Y = (CHUNK_TOTAL_X);
@@ -84,13 +101,31 @@ typedef struct {
 	unsigned int VBO;
 	size_t vertex_count;
 	bool up_to_date;
-} Chunk; // INFO: stored as xzy for reasons I guess
+} Chunk;
+
+void vao_attributes_no_color(unsigned int VAO)
+{
+	glBindVertexArray(VAO);
+
+	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void *)0);
+	glEnableVertexAttribArray(0);
+
+	glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void *)(3 * sizeof(float)));
+	glEnableVertexAttribArray(1);
+}
 
 Chunk chunk_callocrash()
 {
 	Chunk chunk = { 0 };
 	chunk.data = calloc(CHUNK_TOTAL_BLOCKS, sizeof(Block));
 	VASSERT_MSG(chunk.data != NULL, "Buy more ram for more chunks bozo");
+	glGenVertexArrays(1, &chunk.VAO);
+	glGenBuffers(1, &chunk.VBO);
+
+	glBindVertexArray(chunk.VAO);
+	glBindBuffer(GL_ARRAY_BUFFER, chunk.VBO);
+	vao_attributes_no_color(chunk.VAO);
+
 	return chunk;
 }
 
@@ -106,9 +141,10 @@ BlockPos chunk_index_to_blockpos(size_t index)
 
 Block *chunk_xyz_at(Chunk *chunk, int x, int y, int z)
 {
-	VASSERT(x >= 0 && x < CHUNK_TOTAL_X);
-	VASSERT(y >= 0 && y < CHUNK_TOTAL_Y);
-	VASSERT(z >= 0 && z < CHUNK_TOTAL_Z);
+	if (x < 0 || x >= CHUNK_TOTAL_X ||
+	    y < 0 || y >= CHUNK_TOTAL_Y ||
+	    z < 0 || z >= CHUNK_TOTAL_Z)
+		return NULL;
 
 	return &chunk->data[CHUNK_INDEX(x, y, z)];
 }
@@ -397,17 +433,6 @@ bool load_image(Image *img, const char *path)
 	return true;
 }
 
-void vao_attributes_no_color(unsigned int VAO)
-{
-	glBindVertexArray(VAO);
-
-	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void *)0);
-	glEnableVertexAttribArray(0);
-
-	glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void *)(3 * sizeof(float)));
-	glEnableVertexAttribArray(1);
-}
-
 void vao_attributes_color(unsigned int VAO)
 {
 	glBindVertexArray(VAO);
@@ -429,24 +454,22 @@ void print_image_info(Image *image)
 	printf("n_chan: %zu\n", image->n_chan);
 }
 
-void chunk_render(Chunk *chunk, unsigned int VAO, unsigned int shaderProgram)
+void chunk_render(Chunk *chunk, unsigned int shaderProgram)
 {
-	glBindVertexArray(VAO);
-	for (size_t i = 0; i < CHUNK_TOTAL_BLOCKS; i++) {
-		if (chunk->data[i].type == BLOCKTYPE_GRASS) {
-			mat4 model = { 0 };
-			glm_mat4_identity(model);
+	if (chunk->vertex_count == 0 || !chunk->up_to_date)
+		return;
 
-			BlockPos pos = chunk_index_to_blockpos(i);
+	glUseProgram(shaderProgram);
+	glBindVertexArray(chunk->VAO);
 
-			vec3 worldpos = { chunk->pos[0] + pos.x, chunk->pos[1] + pos.y, chunk->pos[2] + pos.z };
-			glm_translate(model, worldpos);
+	mat4 model = { 0 };
+	glm_mat4_identity(model);
+	glm_translate(model, chunk->pos);
 
-			int modelLoc = glGetUniformLocation(shaderProgram, "model");
-			glUniformMatrix4fv(modelLoc, 1, GL_FALSE, (const float *)model);
-			glDrawArrays(GL_TRIANGLES, 0, 36);
-		}
-	}
+	int modelLoc = glGetUniformLocation(shaderProgram, "model");
+	glUniformMatrix4fv(modelLoc, 1, GL_FALSE, (const float *)model);
+
+	glDrawArrays(GL_TRIANGLES, 0, chunk->vertex_count);
 }
 
 void vec3_assign(vec3 v, float x, float y, float z)
@@ -456,41 +479,80 @@ void vec3_assign(vec3 v, float x, float y, float z)
 	v[2] = z;
 }
 
-void add_block_faces_to_buffer(Chunk *chunk, int x, int y, int z, BLOCKTYPE type)
+void add_face_to_buffer(TmpChunkVerts *buffer, int x, int y, int z, CubeFace face)
 {
-	// Check each direction for occlusion
-	CubeFace faces_to_add[6];
-	int face_count = 0;
+	FaceVertices *face_verts = &cube_vertices[(int)face];
+	for (size_t i = 0; i < VERTICES_PER_FACE; i++) {
+		float px = face_verts->vertices[i][0] + 0.5f + (float)x;
+		float py = face_verts->vertices[i][1] + 0.5f + (float)y;
+		float pz = face_verts->vertices[i][2] + 0.5f + (float)z;
 
-	// Simple neighbor checks (would need bounds checking)
-	if (y == CHUNK_TOTAL_Y - 1 || chunk_xyz_at(chunk, x, y + 1, z)->type == BLOCKTYPE_AIR)
-		faces_to_add[face_count++] = FACE_TOP;
-	// ... check other 5 faces
+		float u = face_verts->vertices[i][3];
+		float v = face_verts->vertices[i][4];
 
-	for (int i = 0; i < face_count; i++) {
-		// add_face_to_buffer(x, y, z, faces_to_add[i], type); // TODO:implement
+		vec2 tex_coords = { u, v };
+
+		VASSERT_MSG(buffer->fill + FLOATS_PER_VERTEX < CHUNK_TOTAL_VERTICES, "Vertex buffer overflow!");
+
+		buffer->data[buffer->fill++] = px;
+		buffer->data[buffer->fill++] = py;
+		buffer->data[buffer->fill++] = pz;
+		buffer->data[buffer->fill++] = tex_coords[0]; // u
+		buffer->data[buffer->fill++] = tex_coords[1]; // v
 	}
 }
-void chunk_generate_mesh(Chunk *chunk)
+
+// void add_block_faces_to_buffer(Chunk *chunk, TmpChunkVerts *tmp_chunk_verts, int x, int y, int z, CubeFace face, BLOCKTYPE type)
+// {
+// 	// Check each direction for occlusion
+// 	CubeFace faces_to_add[6];
+// 	int face_count = 0;
+//
+//
+// 	// Simple neighbor checks (would need bounds checking)
+// 	if (y == CHUNK_TOTAL_Y - 1 || chunk_xyz_at(chunk, x, y + 1, z)->type == BLOCKTYPE_AIR)
+// 		faces_to_add[face_count++] = FACE_TOP;
+// 	// ... check other 5 faces
+//
+// 	for (int i = 0; i < face_count; i++) {
+// 		add_face_to_buffer(tmp_chunk_verts, x, y, z, faces_to_add[i], type);
+// 	}
+// }
+
+void chunk_generate_mesh(Chunk *chunk, TmpChunkVerts *tmp_chunk_verts)
 {
-	clear_tmp_chunk_verts();
-	for (size_t y = 0; y < CHUNK_TOTAL_Y; y++) {
-		for (size_t z = 0; z < CHUNK_TOTAL_Z; z++) {
+	if (chunk->up_to_date)
+		return;
+	clear_tmp_chunk_verts(tmp_chunk_verts);
+	for (size_t z = 0; z < CHUNK_TOTAL_Z; z++) {
+		for (size_t y = 0; y < CHUNK_TOTAL_Y; y++) {
 			for (size_t x = 0; x < CHUNK_TOTAL_X; x++) {
 				Block *block = chunk_xyz_at(chunk, x, y, z);
 				if (!block->obstructing)
 					continue;
-				BlockPos a;
-				//add_block_faces_to_buffer(chunk, x, y, z, block->type); // TODO:implement
+
+				for (CubeFace f = FACE_BACK; f < FACES_PER_CUBE; f++) {
+					int nx = x + face_offsets[f][0];
+					int ny = y + face_offsets[f][1];
+					int nz = z + face_offsets[f][2];
+
+					Block *neighbor = chunk_xyz_at(chunk, nx, ny, nz);
+					if (neighbor == NULL) {
+						add_face_to_buffer(tmp_chunk_verts, x, y, z, f);
+					} else if (!neighbor->obstructing) {
+						add_face_to_buffer(tmp_chunk_verts, x, y, z, f);
+					}
+				}
 			}
 		}
 	}
+	glBindVertexArray(chunk->VAO);
 	glBindBuffer(GL_ARRAY_BUFFER, chunk->VBO);
 	glBufferData(GL_ARRAY_BUFFER,
-		     tmp_chunk_verts.fill * sizeof(float),
-		     tmp_chunk_verts.data,
+		     tmp_chunk_verts->fill * sizeof(float),
+		     tmp_chunk_verts->data,
 		     GL_STATIC_DRAW);
-	chunk->vertex_count = tmp_chunk_verts.fill / FLOATS_PER_VERTEX;
+	chunk->vertex_count = tmp_chunk_verts->fill / FLOATS_PER_VERTEX;
 	chunk->up_to_date = true;
 }
 
@@ -579,12 +641,15 @@ int main()
 	// glfwSwapInterval(0); // no vsync
 
 	Chunk chunk = chunk_callocrash();
+	vec3_assign(chunk.pos, 0.0f, 0.0f, 0.0f);
 	Chunk chunk2 = chunk_callocrash();
 	vec3_assign(chunk2.pos, 20.0f, 20.0f, 20.0f);
 	for (size_t i = 0; i < CHUNK_TOTAL_BLOCKS; i++) {
 		BlockPos block = chunk_index_to_blockpos(i);
-		if (block.y <= 5)
+		if (block.y <= 5) {
 			chunk.data[i].type = BLOCKTYPE_GRASS;
+			chunk.data[i].obstructing = true;
+		}
 	}
 	for (size_t i = 0; i < 400; i++) {
 		chunk2.data[i].type = BLOCKTYPE_GRASS;
@@ -599,6 +664,9 @@ int main()
 	glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
 	glfwSetWindowFocusCallback(window, window_focus_callback);
 	glfwSetMouseButtonCallback(window, mouse_button_callback);
+
+	static float tmp_chunk_verts_data[CHUNK_TOTAL_VERTICES];
+	TmpChunkVerts tmp_chunk_verts = { .data = tmp_chunk_verts_data, .fill = 0 };
 
 	while (!glfwWindowShouldClose(window)) {
 		float current_frame = glfwGetTime();
@@ -633,7 +701,7 @@ int main()
 
 		GLenum err;
 		while ((err = glGetError()) != GL_NO_ERROR) {
-			VERROR("OpenGL error: 0x%04X\n", err);
+			VERROR("OpenGL error: 0x%04X", err);
 		}
 
 		glUniform1i(glGetUniformLocation(shaderProgram, "texture1"), 0);
@@ -641,8 +709,10 @@ int main()
 
 		glBindTexture(GL_TEXTURE_2D, texture);
 
-		chunk_render(&chunk, VAO, shaderProgram);
-		chunk_render(&chunk2, VAO, shaderProgram);
+		chunk_generate_mesh(&chunk, &tmp_chunk_verts);
+		chunk_render(&chunk, shaderProgram);
+		chunk_generate_mesh(&chunk2, &tmp_chunk_verts);
+		chunk_render(&chunk2, shaderProgram);
 
 		glfwSwapBuffers(window);
 		glfwPollEvents();
