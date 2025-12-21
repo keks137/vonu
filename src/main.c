@@ -17,13 +17,28 @@
 #include "verts/vert1.c"
 #include "frags/frag1.c"
 
+typedef struct {
+	vec3 pos;
+	vec3 front;
+	vec3 up;
+	float yaw;
+	float pitch;
+	float fov;
+} Camera;
+
+typedef struct {
+	Camera camera;
+	float delta_time;
+	float last_frame;
+	bool paused;
+} GameState;
+GameState game_state = { 0 };
+
 typedef enum {
 	BLOCKTYPE_AIR,
 	BLOCKTYPE_GRASS,
 	BLOCKTYPE_STONE,
 } BLOCKTYPE;
-
-bool paused = false;
 
 #define CHUNK_TOTAL_X 32
 #define CHUNK_TOTAL_Y 32
@@ -151,10 +166,6 @@ Block *chunk_xyz_at(Chunk *chunk, int x, int y, int z)
 
 #define ARRAY_LEN(array) (sizeof(array) / sizeof(array[0]))
 
-float fov = 90.0f;
-float yaw = -90.0f;
-float pitch = 0.0f;
-
 const char *vertexShaderSource = (char *)verts_vert1;
 const char *fragmentShaderSource = (char *)frags_frag1;
 
@@ -165,13 +176,6 @@ const char *fragmentShaderSource = (char *)frags_frag1;
 // 	-0.5f, -0.5f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, // bottom left
 // 	-0.5f, 0.5f, 0.0f, 1.0f, 1.0f, 0.0f, 0.0f, 1.0f // top left
 // };
-
-vec3 camera_pos = { 0.0f, 0.0f, 0.0f };
-vec3 camera_up = { 0.0f, 1.0f, 0.0f };
-vec3 camera_front = { 0.0f, 0.0f, -1.0f };
-
-float delta_time = 0.0f;
-float last_frame = 0.0f;
 
 FaceVertices cube_vertices[] = {
 	//BACK
@@ -238,7 +242,7 @@ MouseState mouse_state;
 
 void mouse_callback(GLFWwindow *window, double xpos, double ypos)
 {
-	if (paused)
+	if (game_state.paused)
 		return;
 	(void)window;
 	if (mouse_state.reset_mouse) {
@@ -256,20 +260,20 @@ void mouse_callback(GLFWwindow *window, double xpos, double ypos)
 	xoffset *= sensitivity;
 	yoffset *= sensitivity;
 
-	yaw += xoffset;
-	pitch += yoffset;
+	game_state.camera.yaw += xoffset;
+	game_state.camera.pitch += yoffset;
 
-	if (pitch > 89.0f)
-		pitch = 89.0f;
-	if (pitch < -89.0f)
-		pitch = -89.0f;
+	if (game_state.camera.pitch > 89.0f)
+		game_state.camera.pitch = 89.0f;
+	if (game_state.camera.pitch < -89.0f)
+		game_state.camera.pitch = -89.0f;
 	vec3 direction = { 0 };
 
-	direction[0] = cos(glm_rad(yaw)) * cos(glm_rad(pitch));
-	direction[1] = sin(glm_rad(pitch));
-	direction[2] = sin(glm_rad(yaw)) * cos(glm_rad(pitch));
+	direction[0] = cos(glm_rad(game_state.camera.yaw)) * cos(glm_rad(game_state.camera.pitch));
+	direction[1] = sin(glm_rad(game_state.camera.pitch));
+	direction[2] = sin(glm_rad(game_state.camera.yaw)) * cos(glm_rad(game_state.camera.pitch));
 	glm_normalize(direction);
-	glm_vec3_copy(direction, camera_front);
+	glm_vec3_copy(direction, game_state.camera.front);
 }
 void framebuffer_size_callback(GLFWwindow *window, int width, int height)
 {
@@ -279,8 +283,8 @@ void framebuffer_size_callback(GLFWwindow *window, int width, int height)
 
 void set_paused(GLFWwindow *window, bool val)
 {
-	paused = val;
-	if (paused) {
+	game_state.paused = val;
+	if (game_state.paused) {
 		glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
 	} else {
 		mouse_state.reset_mouse = true;
@@ -298,7 +302,7 @@ void window_focus_callback(GLFWwindow *window, int focused)
 void mouse_button_callback(GLFWwindow *window, int button, int action, int mods)
 {
 	(void)mods;
-	if (paused) {
+	if (game_state.paused) {
 		if (button == GLFW_MOUSE_BUTTON_LEFT && action == GLFW_PRESS) {
 			set_paused(window, false);
 		}
@@ -318,20 +322,20 @@ void process_input(GLFWwindow *window)
 	bool escapeKeyPressedThisFrame = glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS;
 
 	if (escapeKeyPressedThisFrame && !escapeKeyPressedLastFrame) {
-		set_paused(window, !paused);
+		set_paused(window, !game_state.paused);
 	}
 
 	escapeKeyPressedLastFrame = escapeKeyPressedThisFrame;
 
-	if (paused)
+	if (game_state.paused)
 		return;
 
-	const float camera_speed = movement_speed * delta_time;
+	const float camera_speed = movement_speed * game_state.delta_time;
 	if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS) {
-		camera_pos[1] += camera_speed;
+		game_state.camera.pos[1] += camera_speed;
 	}
 	if (glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS) {
-		camera_pos[1] -= camera_speed;
+		game_state.camera.pos[1] -= camera_speed;
 	}
 	static bool sprinting;
 	float forward_speed = camera_speed;
@@ -342,30 +346,30 @@ void process_input(GLFWwindow *window)
 		forward_speed *= 2;
 
 	vec3 horizontal_front;
-	glm_vec3_copy(camera_front, horizontal_front);
+	glm_vec3_copy(game_state.camera.front, horizontal_front);
 	horizontal_front[1] = 0.0f;
 	glm_normalize(horizontal_front);
 
 	if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) {
-		glm_vec3_muladds(horizontal_front, forward_speed, camera_pos);
+		glm_vec3_muladds(horizontal_front, forward_speed, game_state.camera.pos);
 	} else {
 		sprinting = false;
 	}
 
 	if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) {
-		glm_vec3_mulsubs(horizontal_front, camera_speed, camera_pos);
+		glm_vec3_mulsubs(horizontal_front, camera_speed, game_state.camera.pos);
 	}
 	if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) {
 		vec3 right;
-		glm_cross(horizontal_front, camera_up, right);
+		glm_cross(horizontal_front, game_state.camera.up, right);
 		glm_normalize(right);
-		glm_vec3_mulsubs(right, camera_speed, camera_pos);
+		glm_vec3_mulsubs(right, camera_speed, game_state.camera.pos);
 	}
 	if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) {
 		vec3 right;
-		glm_cross(horizontal_front, camera_up, right);
+		glm_cross(horizontal_front, game_state.camera.up, right);
 		glm_normalize(right);
-		glm_vec3_muladds(right, camera_speed, camera_pos);
+		glm_vec3_muladds(right, camera_speed, game_state.camera.pos);
 	}
 }
 
@@ -608,6 +612,15 @@ int main()
 	if (!create_shader_program(&shaderProgram, vertexShaderSource, fragmentShaderSource))
 		exit(1);
 
+	game_state.camera = (Camera){
+		.fov = 90.0f,
+		.yaw = -90.0f,
+		.pitch = 0.0f,
+		.pos = { 0.0f, 0.0f, 0.0f },
+		.up = { 0.0f, 1.0f, 0.0f },
+		.front = { 0.0f, 0.0f, -1.0f },
+	};
+
 	unsigned int VBO, VAO, EBO;
 	glGenVertexArrays(1, &VAO);
 	glGenBuffers(1, &VBO);
@@ -658,12 +671,12 @@ int main()
 
 	while (!glfwWindowShouldClose(window)) {
 		float current_frame = glfwGetTime();
-		delta_time = current_frame - last_frame;
-		last_frame = current_frame;
+		game_state.delta_time = current_frame - game_state.last_frame;
+		game_state.last_frame = current_frame;
 
 		process_input(window);
 
-		if (paused) {
+		if (game_state.paused) {
 			glfwWaitEvents();
 			continue;
 		}
@@ -671,12 +684,12 @@ int main()
 		mat4 view;
 
 		vec3 camera_pos_plus_front;
-		glm_vec3_add(camera_pos, camera_front, camera_pos_plus_front);
-		glm_lookat(camera_pos, camera_pos_plus_front, camera_up, view);
+		glm_vec3_add(game_state.camera.pos, game_state.camera.front, camera_pos_plus_front);
+		glm_lookat(game_state.camera.pos, camera_pos_plus_front, game_state.camera.up, view);
 
 		mat4 projection = { 0 };
 		float aspect = (float)width / (float)height;
-		glm_perspective(glm_rad(fov), aspect, 0.1f, 100.0f, projection);
+		glm_perspective(glm_rad(game_state.camera.fov), aspect, 0.1f, 100.0f, projection);
 
 		glClearColor(0.39f, 0.58f, 0.92f, 1.0f);
 		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
