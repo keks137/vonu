@@ -3,9 +3,14 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include "vassert.h"
+#include "logs.h"
+#include <time.h>
+#include <unistd.h>
 #define STB_IMAGE_IMPLEMENTATION
 #include "../vendor/stb_image.h"
 #include "../vendor/cglm/cglm.h"
+#include "image.h"
 
 #include "loadopengl.c"
 
@@ -18,12 +23,16 @@ typedef enum {
 	BLOCKTYPE_STONE,
 } BLOCKTYPE;
 
+bool paused = false;
+
 #define CHUNK_TOTAL_X 32
 #define CHUNK_TOTAL_Y 32
 #define CHUNK_TOTAL_Z 32
 #define CHUNK_TOTAL_BLOCKS (CHUNK_TOTAL_X * CHUNK_TOTAL_Y * CHUNK_TOTAL_Z)
-const size_t CHUNK_STRIDE_Y = (CHUNK_TOTAL_X * CHUNK_TOTAL_Y);
-const size_t CHUNK_STRIDE_Z = (CHUNK_TOTAL_X);
+const size_t CHUNK_STRIDE_Y = (CHUNK_TOTAL_X);
+const size_t CHUNK_STRIDE_Z = (CHUNK_TOTAL_X * CHUNK_TOTAL_Y);
+
+#define CHUNK_INDEX(x, y, z) ((x) + (y) * CHUNK_STRIDE_Y + (z) * CHUNK_STRIDE_Z)
 
 float movement_speed = 5.0f;
 typedef struct {
@@ -45,10 +54,7 @@ Chunk chunk_callocrash()
 {
 	Chunk chunk = { 0 };
 	chunk.data = calloc(CHUNK_TOTAL_BLOCKS, sizeof(Block));
-	if (chunk.data == NULL) {
-		fprintf(stderr, "Buy more ram for more chunks bozo\n");
-		abort();
-	}
+	VASSERT_MSG(chunk.data != NULL, "Buy more ram for more chunks bozo");
 	return chunk;
 }
 
@@ -57,14 +63,18 @@ BlockPos chunk_index_to_blockpos(size_t index)
 	BlockPos pos = { 0 };
 	pos.x = index % CHUNK_TOTAL_X;
 	index /= CHUNK_TOTAL_X;
-	pos.z = index % CHUNK_TOTAL_Z;
-	pos.y = index / CHUNK_TOTAL_Z;
+	pos.y = index % CHUNK_TOTAL_Y;
+	pos.z = index / CHUNK_TOTAL_Y;
 	return pos;
 }
 
 Block *chunk_xyz_at(Chunk *chunk, int x, int y, int z)
 {
-	return &chunk->data[y * CHUNK_STRIDE_Y + z * CHUNK_STRIDE_Z + x];
+	VASSERT(x >= 0 && x < CHUNK_TOTAL_X);
+	VASSERT(y >= 0 && y < CHUNK_TOTAL_Y);
+	VASSERT(z >= 0 && z < CHUNK_TOTAL_Z);
+
+	return &chunk->data[CHUNK_INDEX(x, y, z)];
 }
 
 #define ARRAY_LEN(array) (sizeof(array) / sizeof(array[0]))
@@ -76,13 +86,6 @@ float pitch = 0.0f;
 const char *vertexShaderSource = (char *)verts_vert1;
 const char *fragmentShaderSource = (char *)frags_frag1;
 
-typedef struct {
-	unsigned char *data;
-	size_t width;
-	size_t height;
-	size_t n_chan;
-
-} Image;
 // float vertices[] = {
 // 	// positions          // colors           // texture coords
 // 	0.5f, 0.5f, 0.0f, 1.0f, 0.0f, 0.0f, 1.0f, 1.0f, // top right
@@ -154,15 +157,22 @@ unsigned int indices[] = {
 
 float last_x = 400;
 float last_y = 300;
+typedef struct {
+	bool reset_mouse
+} MouseState;
+MouseState mouse_state;
+
 void mouse_callback(GLFWwindow *window, double xpos, double ypos)
 {
+	if (paused)
+		return;
 	(void)window;
-	static bool first_mouse = true;
-	if (first_mouse) {
+	if (mouse_state.reset_mouse) {
 		last_x = xpos;
 		last_y = ypos;
-		first_mouse = false;
+		mouse_state.reset_mouse = false;
 	}
+
 	float xoffset = xpos - last_x;
 	float yoffset = last_y - ypos;
 	last_x = xpos;
@@ -193,10 +203,57 @@ void framebuffer_size_callback(GLFWwindow *window, int width, int height)
 	glViewport(0, 0, width, height);
 }
 
+void set_paused(GLFWwindow *window, bool val)
+{
+	paused = val;
+	if (paused) {
+		glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+	} else {
+		mouse_state.reset_mouse = true;
+		glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+	}
+}
+
+void window_focus_callback(GLFWwindow *window, int focused)
+{
+	if (focused == GLFW_TRUE) {
+	} else {
+		set_paused(window, true);
+	}
+}
+void mouse_button_callback(GLFWwindow *window, int button, int action, int mods)
+{
+	if (paused) {
+		if (button == GLFW_MOUSE_BUTTON_LEFT && action == GLFW_PRESS) {
+			set_paused(window, false);
+		}
+		if (button == GLFW_MOUSE_BUTTON_RIGHT && action == GLFW_PRESS) {
+			set_paused(window, false);
+		}
+	} else {
+	}
+	// if (button == GLFW_MOUSE_BUTTON_MIDDLE && action == GLFW_PRESS) {
+	// }
+}
+
 void process_input(GLFWwindow *window)
 {
-	if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
-		glfwSetWindowShouldClose(window, true);
+	int focused = glfwGetWindowAttrib(window, GLFW_FOCUSED);
+	int iconified = glfwGetWindowAttrib(window, GLFW_ICONIFIED);
+
+	static bool escapeKeyPressedLastFrame = false;
+
+	bool escapeKeyPressedThisFrame = glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS;
+
+	if (escapeKeyPressedThisFrame && !escapeKeyPressedLastFrame) {
+		set_paused(window, !paused);
+	}
+
+	escapeKeyPressedLastFrame = escapeKeyPressedThisFrame;
+
+	if (paused)
+		return;
+
 	const float camera_speed = movement_speed * delta_time;
 	if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS) {
 		camera_pos[1] += camera_speed;
@@ -204,7 +261,6 @@ void process_input(GLFWwindow *window)
 	if (glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS) {
 		camera_pos[1] -= camera_speed;
 	}
-
 	static bool sprinting;
 	float forward_speed = camera_speed;
 	if (glfwGetKey(window, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS) {
@@ -248,7 +304,7 @@ bool verify_shader(unsigned int shader)
 	glGetShaderiv(shader, GL_COMPILE_STATUS, &success);
 	if (!success) {
 		glGetShaderInfoLog(shader, 512, NULL, infoLog);
-		fprintf(stderr, "Error: %s", infoLog);
+		VERROR(infoLog);
 		return false;
 	}
 	return true;
@@ -260,7 +316,7 @@ bool verify_program(unsigned int program)
 	glGetProgramiv(program, GL_LINK_STATUS, &success);
 	if (!success) {
 		glGetProgramInfoLog(program, 512, NULL, infoLog);
-		fprintf(stderr, "Error: %s", infoLog);
+		VERROR(infoLog);
 		return false;
 	}
 	return true;
@@ -337,7 +393,7 @@ void print_image_info(Image *image)
 	printf("n_chan: %zu\n", image->n_chan);
 }
 
-void render_chunk(Chunk *chunk, unsigned int VAO, unsigned int shaderProgram)
+void chunk_render(Chunk *chunk, unsigned int VAO, unsigned int shaderProgram)
 {
 	glBindVertexArray(VAO);
 	for (size_t i = 0; i < CHUNK_TOTAL_BLOCKS; i++) {
@@ -393,7 +449,6 @@ int main()
 
 	glEnable(GL_DEPTH_TEST);
 
-	glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
 	glfwSetCursorPosCallback(window, mouse_callback);
 
 	glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
@@ -452,16 +507,31 @@ int main()
 	Chunk chunk = chunk_callocrash();
 	Chunk chunk2 = chunk_callocrash();
 	vec3_assign(chunk2.pos, 20.0f, 20.0f, 20.0f);
-	for (size_t i = 0; i < 2000; i++) {
-		chunk.data[i].type = BLOCKTYPE_GRASS;
+	for (size_t i = 0; i < CHUNK_TOTAL_BLOCKS; i++) {
+		BlockPos block = chunk_index_to_blockpos(i);
+		if (block.y <= 5)
+			chunk.data[i].type = BLOCKTYPE_GRASS;
 	}
 	for (size_t i = 0; i < 400; i++) {
 		chunk2.data[i].type = BLOCKTYPE_GRASS;
 	}
+
+	glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+	VINFO("Hi!");
+	glfwSetWindowFocusCallback(window, window_focus_callback);
+	glfwSetMouseButtonCallback(window, mouse_button_callback);
+
 	while (!glfwWindowShouldClose(window)) {
 		float current_frame = glfwGetTime();
 		delta_time = current_frame - last_frame;
 		last_frame = current_frame;
+
+		process_input(window);
+
+		if (paused) {
+			glfwWaitEvents();
+			continue;
+		}
 
 		mat4 view;
 
@@ -472,8 +542,6 @@ int main()
 		mat4 projection = { 0 };
 		float aspect = (float)width / (float)height;
 		glm_perspective(glm_rad(fov), aspect, 0.1f, 100.0f, projection);
-
-		process_input(window);
 
 		glClearColor(0.39f, 0.58f, 0.92f, 1.0f);
 		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -488,7 +556,7 @@ int main()
 
 		GLenum err;
 		while ((err = glGetError()) != GL_NO_ERROR) {
-			fprintf(stderr, "OpenGL error: 0x%04X\n", err);
+			VERROR("OpenGL error: 0x%04X\n", err);
 		}
 
 		glUniform1i(glGetUniformLocation(shaderProgram, "texture1"), 0);
@@ -496,8 +564,8 @@ int main()
 
 		glBindTexture(GL_TEXTURE_2D, texture);
 
-		render_chunk(&chunk, VAO, shaderProgram);
-		render_chunk(&chunk2, VAO, shaderProgram);
+		chunk_render(&chunk, VAO, shaderProgram);
+		chunk_render(&chunk2, VAO, shaderProgram);
 
 		glfwSwapBuffers(window);
 		glfwPollEvents();

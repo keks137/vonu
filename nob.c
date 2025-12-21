@@ -6,6 +6,12 @@
 #define BUILD_DIR "build/"
 #define BIN_DIR "bin/"
 
+void append_source_files(Nob_Cmd *cmd){
+	nob_cc_inputs(cmd, SRC_DIR "main.c");
+	nob_cc_inputs(cmd, SRC_DIR "atlas.c");
+	nob_cc_inputs(cmd, SRC_DIR "logs.c");
+
+}
 void linux_mingw_glfw_flags(Nob_Cmd *cmd)
 {
 	nob_cmd_append(cmd, "-ggdb");
@@ -58,7 +64,7 @@ bool linux_build(Nob_Cmd *cmd)
 	// nob_cmd_append(cmd, "-fsanitize=address");
 	// nob_cmd_append(cmd, "-fsanitize=undefined");
 	
-	nob_cc_inputs(cmd, SRC_DIR "main.c");
+	append_source_files(cmd);
 	nob_cc_inputs(cmd, BUILD_DIR "rglfw.o");
 	nob_cc_output(cmd, BIN_DIR "vonu");
 	if (!nob_cmd_run(cmd))
@@ -78,7 +84,7 @@ bool linux_mingw_build(Nob_Cmd *cmd)
 
 	linux_mingw_glfw_flags(cmd);
 	nob_cmd_append(cmd, "-static");
-	nob_cc_inputs(cmd, SRC_DIR "main.c");
+	append_source_files(cmd);
 	nob_cc_inputs(cmd, BUILD_DIR "rglfwmingw.o");
 	nob_cmd_append(cmd, "-lgdi32");
 	nob_cmd_append(cmd, "-luser32");
