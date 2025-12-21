@@ -502,22 +502,21 @@ void add_face_to_buffer(TmpChunkVerts *buffer, int x, int y, int z, CubeFace fac
 	}
 }
 
-// void add_block_faces_to_buffer(Chunk *chunk, TmpChunkVerts *tmp_chunk_verts, int x, int y, int z, CubeFace face, BLOCKTYPE type)
-// {
-// 	// Check each direction for occlusion
-// 	CubeFace faces_to_add[6];
-// 	int face_count = 0;
-//
-//
-// 	// Simple neighbor checks (would need bounds checking)
-// 	if (y == CHUNK_TOTAL_Y - 1 || chunk_xyz_at(chunk, x, y + 1, z)->type == BLOCKTYPE_AIR)
-// 		faces_to_add[face_count++] = FACE_TOP;
-// 	// ... check other 5 faces
-//
-// 	for (int i = 0; i < face_count; i++) {
-// 		add_face_to_buffer(tmp_chunk_verts, x, y, z, faces_to_add[i], type);
-// 	}
-// }
+void add_block_faces_to_buffer(Chunk *chunk, TmpChunkVerts *tmp_chunk_verts, int x, int y, int z)
+{
+	for (CubeFace f = FACE_BACK; f < FACES_PER_CUBE; f++) {
+		int nx = x + face_offsets[f][0];
+		int ny = y + face_offsets[f][1];
+		int nz = z + face_offsets[f][2];
+
+		Block *neighbor = chunk_xyz_at(chunk, nx, ny, nz);
+		if (neighbor == NULL) {
+			add_face_to_buffer(tmp_chunk_verts, x, y, z, f);
+		} else if (!neighbor->obstructing) {
+			add_face_to_buffer(tmp_chunk_verts, x, y, z, f);
+		}
+	}
+}
 
 void chunk_generate_mesh(Chunk *chunk, TmpChunkVerts *tmp_chunk_verts)
 {
@@ -531,18 +530,7 @@ void chunk_generate_mesh(Chunk *chunk, TmpChunkVerts *tmp_chunk_verts)
 				if (!block->obstructing)
 					continue;
 
-				for (CubeFace f = FACE_BACK; f < FACES_PER_CUBE; f++) {
-					int nx = x + face_offsets[f][0];
-					int ny = y + face_offsets[f][1];
-					int nz = z + face_offsets[f][2];
-
-					Block *neighbor = chunk_xyz_at(chunk, nx, ny, nz);
-					if (neighbor == NULL) {
-						add_face_to_buffer(tmp_chunk_verts, x, y, z, f);
-					} else if (!neighbor->obstructing) {
-						add_face_to_buffer(tmp_chunk_verts, x, y, z, f);
-					}
-				}
+				add_block_faces_to_buffer(chunk, tmp_chunk_verts, x, y, z);
 			}
 		}
 	}
