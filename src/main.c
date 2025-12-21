@@ -6,20 +6,12 @@
 #include "vassert.h"
 #include "logs.h"
 #include <time.h>
-<<<<<<< HEAD
-=======
 #include "loadopengl.h"
->>>>>>> ORIG_HEAD
 #include <unistd.h>
 #define STB_IMAGE_IMPLEMENTATION
 #include "../vendor/stb_image.h"
 #include "../vendor/cglm/cglm.h"
 #include "image.h"
-<<<<<<< HEAD
-
-#include "loadopengl.c"
-=======
->>>>>>> ORIG_HEAD
 
 #include "verts/vert1.c"
 #include "frags/frag1.c"
@@ -36,7 +28,6 @@ bool paused = false;
 #define CHUNK_TOTAL_Y 32
 #define CHUNK_TOTAL_Z 32
 #define CHUNK_TOTAL_BLOCKS (CHUNK_TOTAL_X * CHUNK_TOTAL_Y * CHUNK_TOTAL_Z)
-<<<<<<< HEAD
 
 #define FLOATS_PER_VERTEX 5
 #define VERTICES_PER_FACE 6
@@ -70,8 +61,6 @@ void clear_tmp_chunk_verts()
 	tmp_chunk_verts.fill = 0;
 }
 
-=======
->>>>>>> ORIG_HEAD
 const size_t CHUNK_STRIDE_Y = (CHUNK_TOTAL_X);
 const size_t CHUNK_STRIDE_Z = (CHUNK_TOTAL_X * CHUNK_TOTAL_Y);
 
@@ -272,10 +261,7 @@ void window_focus_callback(GLFWwindow *window, int focused)
 }
 void mouse_button_callback(GLFWwindow *window, int button, int action, int mods)
 {
-<<<<<<< HEAD
-=======
 	(void)mods;
->>>>>>> ORIG_HEAD
 	if (paused) {
 		if (button == GLFW_MOUSE_BUTTON_LEFT && action == GLFW_PRESS) {
 			set_paused(window, false);
@@ -605,17 +591,12 @@ int main()
 		chunk2.data[i].obstructing = true;
 	}
 
-<<<<<<< HEAD
 	glUseProgram(shaderProgram);
 	glUniform1i(glGetUniformLocation(shaderProgram, "texture1"), 0);
 	glActiveTexture(GL_TEXTURE0);
 	glBindTexture(GL_TEXTURE_2D, texture);
 
 	glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
-	VINFO("Hi!");
-=======
-	glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
->>>>>>> ORIG_HEAD
 	glfwSetWindowFocusCallback(window, window_focus_callback);
 	glfwSetMouseButtonCallback(window, mouse_button_callback);
 

@@ -6,20 +6,12 @@
 #define BUILD_DIR "build/"
 #define BIN_DIR "bin/"
 
-<<<<<<< HEAD
-void append_source_files(Nob_Cmd *cmd){
-	nob_cc_inputs(cmd, SRC_DIR "main.c");
-	nob_cc_inputs(cmd, SRC_DIR "atlas.c");
-	nob_cc_inputs(cmd, SRC_DIR "logs.c");
-
-=======
 void append_source_files(Nob_Cmd *cmd)
 {
 	nob_cc_inputs(cmd, SRC_DIR "main.c");
 	nob_cc_inputs(cmd, SRC_DIR "atlas.c");
 	nob_cc_inputs(cmd, SRC_DIR "logs.c");
 	nob_cc_inputs(cmd, SRC_DIR "loadopengl.c");
->>>>>>> ORIG_HEAD
 }
 void linux_mingw_glfw_flags(Nob_Cmd *cmd)
 {
@@ -72,11 +64,6 @@ bool linux_build(Nob_Cmd *cmd)
 	linux_glfw_flags(cmd);
 	// nob_cmd_append(cmd, "-fsanitize=address");
 	// nob_cmd_append(cmd, "-fsanitize=undefined");
-<<<<<<< HEAD
-	
-=======
-
->>>>>>> ORIG_HEAD
 	append_source_files(cmd);
 	nob_cc_inputs(cmd, BUILD_DIR "rglfw.o");
 	nob_cc_output(cmd, BIN_DIR "vonu");
