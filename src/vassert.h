@@ -1,6 +1,7 @@
 #ifndef INCLUDE_SRC_ASSERTS_H_
 #define INCLUDE_SRC_ASSERTS_H_
 
+
 #ifdef VABORT_DEBUG
 #if _MSC_VER
 #include <intrin.h>
