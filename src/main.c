@@ -140,17 +140,24 @@ void vao_attributes_no_color(unsigned int VAO)
 	glEnableVertexAttribArray(1);
 }
 
+void chunk_init(Chunk *chunk)
+{
+	glGenVertexArrays(1, &chunk->VAO);
+	glGenBuffers(1, &chunk->VBO);
+
+	glBindVertexArray(chunk->VAO);
+	glBindBuffer(GL_ARRAY_BUFFER, chunk->VBO);
+	vao_attributes_no_color(chunk->VAO);
+	chunk->initialized = true;
+}
+
 Chunk chunk_callocrash()
 {
 	Chunk chunk = { 0 };
 	chunk.data = calloc(CHUNK_TOTAL_BLOCKS, sizeof(Block));
 	VASSERT_MSG(chunk.data != NULL, "Buy more ram for more chunks bozo");
-	glGenVertexArrays(1, &chunk.VAO);
-	glGenBuffers(1, &chunk.VBO);
 
-	glBindVertexArray(chunk.VAO);
-	glBindBuffer(GL_ARRAY_BUFFER, chunk.VBO);
-	vao_attributes_no_color(chunk.VAO);
+	chunk_init(&chunk);
 
 	return chunk;
 }
@@ -464,8 +471,16 @@ void print_image_info(Image *image)
 
 void chunk_render(Chunk *chunk, ShaderData shader_data)
 {
-	if (chunk->vertex_count == 0 || !chunk->up_to_date)
+	if (!chunk->up_to_date)
 		return;
+	if (chunk->vertex_count == 0) {
+		// VERROR("This guy again:");
+		// print_chunk(chunk);
+		return;
+	}
+
+	VASSERT_MSG(chunk->contains_blocks, "How did it get here?");
+	// VASSERT_MSG(chunk->vertex_count > 0, "How did it get here?");
 
 	chunk->unchanged_render_count++;
 
@@ -547,9 +562,10 @@ void add_block_faces_to_buffer(Chunk *chunk, TmpChunkVerts *tmp_chunk_verts, int
 
 void chunk_generate_mesh(Chunk *chunk, TmpChunkVerts *tmp_chunk_verts)
 {
-	if (chunk->up_to_date)
+	if (chunk->up_to_date || !chunk->contains_blocks)
 		return;
 	VASSERT(chunk->data != NULL);
+
 	chunk->unchanged_render_count = 0;
 	clear_tmp_chunk_verts(tmp_chunk_verts);
 	for (size_t z = 0; z < CHUNK_TOTAL_Z; z++) {
@@ -571,6 +587,11 @@ void chunk_generate_mesh(Chunk *chunk, TmpChunkVerts *tmp_chunk_verts)
 		     tmp_chunk_verts->data,
 		     GL_DYNAMIC_DRAW);
 	chunk->vertex_count = tmp_chunk_verts->fill / FLOATS_PER_VERTEX;
+
+	if (chunk->vertex_count == 0) {
+		VERROR("This guy:");
+		print_chunk(chunk);
+	}
 	chunk->up_to_date = true;
 }
 
@@ -579,7 +600,14 @@ void print_chunk(Chunk *chunk)
 	VINFO("Chunk: %p", chunk);
 	VINFO("Data: %p", chunk->data);
 	VINFO("coords: %i %i %i", chunk->coord.x, chunk->coord.y, chunk->coord.z);
+	VINFO("VAO: %i", chunk->VAO);
+	VINFO("VBO: %i", chunk->VBO);
+	VINFO("unchanged_render_count: %i", chunk->unchanged_render_count);
 	VINFO("up_to_date: %s", chunk->up_to_date ? "true" : "false");
+	VINFO("terrain_generated: %s", chunk->terrain_generated ? "true" : "false");
+	VINFO("contains_blocks: %s", chunk->contains_blocks ? "true" : "false");
+	VINFO("initialized: %s", chunk->initialized ? "true" : "false");
+	VINFO("unloaded: %s", chunk->unloaded ? "true" : "false");
 	VINFO("vertex_count: %i", chunk->vertex_count);
 }
 
@@ -590,20 +618,26 @@ void chunk_generate_terrain(Chunk *chunk)
 	VASSERT(chunk->data != NULL);
 	// VINFO("Generating terrain: %i %i %i", chunk->coord.x, chunk->coord.y, chunk->coord.z);
 
-	for (size_t z = 0; z < CHUNK_TOTAL_Z; z++)
-		for (size_t y = 0; y < CHUNK_TOTAL_Y; y++)
-			for (size_t x = 0; x < CHUNK_TOTAL_X; x++) {
-				if (y < 5) {
-					chunk->data[CHUNK_INDEX(x, y, z)].type = BLOCKTYPE_GRASS;
-					chunk->data[CHUNK_INDEX(x, y, z)].obstructing = true;
+	if (chunk->coord.y == 0) {
+		for (size_t z = 0; z < CHUNK_TOTAL_Z; z++)
+			for (size_t y = 0; y < CHUNK_TOTAL_Y; y++)
+				for (size_t x = 0; x < CHUNK_TOTAL_X; x++) {
+					if (y < 5) {
+						chunk->contains_blocks = true;
+						chunk->data[CHUNK_INDEX(x, y, z)].type = BLOCKTYPE_GRASS;
+						chunk->data[CHUNK_INDEX(x, y, z)].obstructing = true;
+					}
 				}
-			}
+	}
+	chunk->terrain_generated = true;
 }
 
 void chunk_load(Chunk *chunk, ChunkCoord coord)
 {
+	chunk_init(chunk);
 	chunk->last_used = time(NULL);
 	chunk->coord = coord;
+	memset(chunk->data, 0, sizeof(Block) * CHUNK_TOTAL_BLOCKS);
 	chunk_generate_terrain(chunk);
 }
 
@@ -666,19 +700,29 @@ size_t pool_replaceable_index(ChunkPool *pool)
 
 void chunk_clear_metadata(Chunk *chunk)
 {
-	// chunk->VAO = 0;
-	// chunk->VBO = 0;
-	chunk->coord = (ChunkCoord){ 0, 0, 0 };
-	chunk->up_to_date = false;
-	chunk->vertex_count = 0;
-	chunk->last_used = 0;
+	Chunk tmp = { 0 };
+	tmp.data = chunk->data;
+	tmp.VAO = chunk->VAO;
+	tmp.VBO = chunk->VBO;
+	memset(chunk, 0, sizeof(*chunk));
+	chunk->VAO = tmp.VAO;
+	chunk->VBO = tmp.VBO;
+	chunk->data = tmp.data;
 }
-void pool_reserve(ChunkPool *pool)
+void pool_reserve(ChunkPool *pool, size_t num)
 {
-	VASSERT(pool->lvl < pool->cap);
-	Chunk chunk = chunk_callocrash();
-	pool->chunk[pool->lvl] = chunk;
-	pool->lvl++;
+	VASSERT(pool->lvl + num <= pool->cap);
+	pool->blockdata = realloc(pool->blockdata, sizeof(Block) * (pool->lvl + num) * CHUNK_TOTAL_BLOCKS);
+	VASSERT_MSG(pool->blockdata != NULL, "Buy more ram bozo");
+	Block *start_new_blocks = pool->blockdata + sizeof(Block) * CHUNK_TOTAL_BLOCKS * pool->lvl;
+	memset(start_new_blocks, 0, num * sizeof(Block) * CHUNK_TOTAL_BLOCKS);
+
+	for (size_t i = 0; i < num; i++) {
+		Chunk chunk = { 0 };
+		chunk.data = start_new_blocks + i * CHUNK_TOTAL_BLOCKS;
+		pool->chunk[pool->lvl + i] = chunk;
+	}
+	pool->lvl += num;
 }
 size_t pool_append(ChunkPool *pool, ChunkCoord coord)
 {
@@ -762,7 +806,7 @@ size_t poolunloaded_add(ChunkPool *pool, Chunk chunk)
 size_t pool_unload(ChunkPool *pool, size_t index)
 {
 	VASSERT(pool->lvl > index);
-	VASSERT_MSG(pool->chunk[index].up_to_date, "There was no reason to unload this");
+	VASSERT_MSG(pool->chunk[index].up_to_date || !pool->chunk[index].contains_blocks, "There was no reason to unload this");
 
 	Chunk tmp = pool->chunk[index];
 
@@ -782,11 +826,31 @@ size_t pool_find_unloadable(ChunkPool *pool)
 	size_t count = 0;
 	for (size_t i = 0; i < pool->lvl; i++) {
 		if (pool->chunk[i].unchanged_render_count > 5) {
+			VASSERT(pool->chunk[i].terrain_generated);
+			pool_unload(pool, i);
+			count++;
+		} else if (pool->chunk[i].contains_blocks == false) {
 			pool_unload(pool, i);
 			count++;
 		}
 	}
 	return count;
+}
+
+bool pool_load_relaxed(ChunkPool *pool, ChunkCoord coord, size_t *index)
+{
+	if (poolunloaded_find_chunk_coord(&pool->unloaded, coord, index)) {
+		return true;
+	}
+	if (pool_find_chunk_coord(pool, coord, index)) {
+		return true;
+	}
+	if (pool->lvl < pool->cap) {
+		*index = pool_append(pool, coord);
+		return true;
+	}
+
+	return false;
 }
 
 size_t pool_load(ChunkPool *pool, ChunkCoord coord)
@@ -796,9 +860,7 @@ size_t pool_load(ChunkPool *pool, ChunkCoord coord)
 	if (poolunloaded_find_chunk_coord(&pool->unloaded, coord, &index)) {
 		return index;
 	}
-	// VINFO("Searching: %i %i %i", coord.x, coord.y, coord.z);
 	if (pool_find_chunk_coord(pool, coord, &index)) {
-		// VINFO("Found %i", index);
 		return index;
 	}
 
@@ -816,9 +878,7 @@ void world_init(World *world)
 	world->pool.unloaded.chunk = calloc(world->pool.unloaded.cap, sizeof(Chunk));
 	VASSERT(world->pool.unloaded.chunk != NULL);
 
-	for (size_t i = 0; i < world->pool.cap; i++) {
-		pool_reserve(&world->pool);
-	}
+	pool_reserve(&world->pool, world->pool.cap);
 
 	size_t pl = 0;
 
@@ -861,34 +921,35 @@ void print_poolunloaded(ChunkPoolUnloaded *pool)
 
 void world_update(World *world)
 {
-	VINFO("Unloadable: %zu",
-	      pool_find_unloadable(&world->pool));
-	VINFO("==========================================");
-	print_poolunloaded(&world->pool.unloaded);
+	size_t unloadable = pool_find_unloadable(&world->pool);
+	// VINFO("Unloadable: %zu", unloadable);
+	// VINFO("==========================================");
+	// print_poolunloaded(&world->pool.unloaded);
 
 	// if (world->pool.lvl < world->pool.cap) {
 	// TODO: something better (or separate thread)
 	ChunkCoord new_chunk = world_coord_to_chunk(world->player.pos);
-	if (new_chunk.x != world->player.chunk_pos.x ||
-	    new_chunk.y != world->player.chunk_pos.y ||
-	    new_chunk.z != world->player.chunk_pos.z) {
-		world->player.chunk_pos = new_chunk;
-		for (int z = -RENDER_DISTANCE_Z; z <= RENDER_DISTANCE_Z; z++) {
-			for (int y = -RENDER_DISTANCE_Y; y <= RENDER_DISTANCE_Y; y++) {
-				for (int x = -RENDER_DISTANCE_X; x <= RENDER_DISTANCE_X; x++) {
-					ChunkCoord coord = {
-						world->player.chunk_pos.x + x,
-						world->player.chunk_pos.y + y,
-						world->player.chunk_pos.z + z
-					};
+	// if (new_chunk.x != world->player.chunk_pos.x ||
+	//     new_chunk.y != world->player.chunk_pos.y ||
+	//     new_chunk.z != world->player.chunk_pos.z) {
+	world->player.chunk_pos = new_chunk;
+	for (int z = -RENDER_DISTANCE_Z; z <= RENDER_DISTANCE_Z; z++) {
+		for (int y = -RENDER_DISTANCE_Y; y <= RENDER_DISTANCE_Y; y++) {
+			for (int x = -RENDER_DISTANCE_X; x <= RENDER_DISTANCE_X; x++) {
+				ChunkCoord coord = {
+					world->player.chunk_pos.x + x,
+					world->player.chunk_pos.y + y,
+					world->player.chunk_pos.z + z
+				};
 
-					// VINFO("Trying to load: %i %i %i", coord.x, coord.y, coord.z);
-					size_t index = pool_load(&world->pool, coord);
-					// VINFO("Loaded index: %i", index);
-				}
+				// VINFO("Trying to load: %i %i %i", coord.x, coord.y, coord.z);
+				size_t index;
+				pool_load_relaxed(&world->pool, coord, &index);
+				// VINFO("Loaded index: %i", index);
 			}
 		}
 	}
+	// }
 }
 void player_update(Player *player, Camera *camera)
 {

@@ -12,6 +12,7 @@ typedef struct {
 typedef struct {
 	ChunkPoolUnloaded unloaded;
 	Chunk *chunk;
+	Block *blockdata;
 	size_t lvl;
 	size_t cap;
 } ChunkPool;

@@ -40,6 +40,8 @@ typedef struct {
 	size_t vertex_count;
 	bool contains_blocks;
 	bool up_to_date;
+	bool initialized;
+	bool terrain_generated;
 	uint64_t unchanged_render_count;
 	bool unloaded;
 	time_t last_used;
