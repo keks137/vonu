@@ -161,10 +161,6 @@ Chunk chunk_callocrash()
 
 	return chunk;
 }
-void chunk_free(Chunk *chunk)
-{
-	free(chunk->data);
-}
 
 BlockPos chunk_index_to_blockpos(size_t index)
 {
@@ -753,7 +749,6 @@ size_t pool_add(ChunkPool *pool, ChunkCoord coord)
 void pool_remove(ChunkPool *pool, size_t index)
 {
 	VASSERT(pool->lvl > index);
-	chunk_free(&pool->chunk[index]);
 	pool->lvl--;
 	pool->chunk[index] = pool->chunk[pool->lvl];
 }
