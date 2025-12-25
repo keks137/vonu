@@ -7,7 +7,7 @@
 		return false;                         \
 	}
 
-
+PFNGLDELETEVERTEXARRAYSPROC glDeleteVertexArrays = NULL;
 PFNGLVIEWPORTPROC glViewport = NULL;
 PFNGLCLEARCOLORPROC glClearColor = NULL;
 PFNGLCLEARPROC glClear = NULL;
@@ -45,6 +45,7 @@ PFNGLUNIFORM1IPROC glUniform1i = NULL;
 PFNGLACTIVETEXTUREPROC glActiveTexture = NULL;
 PFNGLENABLEPROC glEnable = NULL;
 PFNGLCULLFACEPROC glCullFace = NULL;
+PFNGLDELETEBUFFERSPROC glDeleteBuffers = NULL;
 
 bool load_gl_functions()
 {
@@ -85,6 +86,8 @@ bool load_gl_functions()
 	LOAD_GL_FUNC(PFNGLCLEARPROC, glClear);
 	LOAD_GL_FUNC(PFNGLCLEARCOLORPROC, glClearColor);
 	LOAD_GL_FUNC(PFNGLVIEWPORTPROC, glViewport);
+	LOAD_GL_FUNC(PFNGLDELETEBUFFERSPROC, glDeleteBuffers);
+	LOAD_GL_FUNC(PFNGLDELETEVERTEXARRAYSPROC, glDeleteVertexArrays);
 
 	return true;
 }

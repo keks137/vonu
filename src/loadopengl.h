@@ -11,6 +11,8 @@
 #include <GLFW/glfw3.h>
 #include <GL/glcorearb.h>
 #include <stdbool.h>
+extern PFNGLDELETEVERTEXARRAYSPROC glDeleteVertexArrays;
+extern PFNGLDELETEBUFFERSPROC glDeleteBuffers;
 extern PFNGLVIEWPORTPROC glViewport;
 extern PFNGLCLEARCOLORPROC glClearColor;
 extern PFNGLCLEARPROC glClear;

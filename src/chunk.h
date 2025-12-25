@@ -5,11 +5,24 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <time.h>
+
+#define BLOCKTYPE_NAMES    \
+	X(BlocktypeAir)   \
+	X(BlocktypeGrass) \
+	X(BlocktypeStone)
+
 typedef enum {
-	BLOCKTYPE_AIR,
-	BLOCKTYPE_GRASS,
-	BLOCKTYPE_STONE,
+#define X(name) name,
+	BLOCKTYPE_NAMES
+#undef X
 } BLOCKTYPE;
+
+const char *BlockTypeString[] = {
+#define X(name) #name,
+	BLOCKTYPE_NAMES
+#undef X
+};
+
 typedef struct {
 	BLOCKTYPE type;
 	bool obstructing;
@@ -42,12 +55,12 @@ typedef struct {
 	bool up_to_date;
 	bool initialized;
 	bool terrain_generated;
+	bool has_vbo_data;
 	uint64_t unchanged_render_count;
 	bool unloaded;
 	time_t last_used;
 } Chunk;
 
-
 void print_chunk(Chunk *chunk);
 
-#endif  // INCLUDE_SRC_CHUNK_H_
+#endif // INCLUDE_SRC_CHUNK_H_
