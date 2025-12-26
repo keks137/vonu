@@ -206,56 +206,55 @@ const char *vertexShaderSource = (char *)verts_vert1;
 const char *fragmentShaderSource = (char *)frags_frag1;
 
 FaceVertices cube_vertices[] = {
-	//BACK
+	// BACK
 	{
-		{ { 0.5f, 0.5f, -0.5f, 1.0f, 1.0f },
-		  { 0.5f, -0.5f, -0.5f, 1.0f, 0.0f },
-		  { -0.5f, -0.5f, -0.5f, 0.0f, 0.0f },
-		  { -0.5f, -0.5f, -0.5f, 0.0f, 0.0f },
-		  { -0.5f, 0.5f, -0.5f, 0.0f, 1.0f },
-		  { 0.5f, 0.5f, -0.5f, 1.0f, 1.0f } } },
+		{ { 0.5f, 0.5f, -0.5f, 0.0f, 0.0f },
+		  { 0.5f, -0.5f, -0.5f, 0.0f, 1.0f },
+		  { -0.5f, -0.5f, -0.5f, 1.0f, 1.0f },
+		  { -0.5f, -0.5f, -0.5f, 1.0f, 1.0f },
+		  { -0.5f, 0.5f, -0.5f, 1.0f, 0.0f },
+		  { 0.5f, 0.5f, -0.5f, 0.0f, 0.0f } } },
 	// FRONT
 	{
-		{ { -0.5f, -0.5f, 0.5f, 0.0f, 0.0f },
-		  { 0.5f, -0.5f, 0.5f, 1.0f, 0.0f },
-		  { 0.5f, 0.5f, 0.5f, 1.0f, 1.0f },
-		  { 0.5f, 0.5f, 0.5f, 1.0f, 1.0f },
-		  { -0.5f, 0.5f, 0.5f, 0.0f, 1.0f },
-		  { -0.5f, -0.5f, 0.5f, 0.0f, 0.0f } } },
+		{ { -0.5f, -0.5f, 0.5f, 0.0f, 1.0f },
+		  { 0.5f, -0.5f, 0.5f, 1.0f, 1.0f },
+		  { 0.5f, 0.5f, 0.5f, 1.0f, 0.0f },
+		  { 0.5f, 0.5f, 0.5f, 1.0f, 0.0f },
+		  { -0.5f, 0.5f, 0.5f, 0.0f, 0.0f },
+		  { -0.5f, -0.5f, 0.5f, 0.0f, 1.0f } } },
 	// LEFT
 	{
 		{ { -0.5f, 0.5f, 0.5f, 1.0f, 0.0f },
-		  { -0.5f, 0.5f, -0.5f, 1.0f, 1.0f },
+		  { -0.5f, 0.5f, -0.5f, 0.0f, 0.0f },
 		  { -0.5f, -0.5f, -0.5f, 0.0f, 1.0f },
 		  { -0.5f, -0.5f, -0.5f, 0.0f, 1.0f },
-		  { -0.5f, -0.5f, 0.5f, 0.0f, 0.0f },
+		  { -0.5f, -0.5f, 0.5f, 1.0f, 1.0f },
 		  { -0.5f, 0.5f, 0.5f, 1.0f, 0.0f } } },
 	// RIGHT
 	{
-		{ { 0.5f, -0.5f, -0.5f, 0.0f, 1.0f },
-		  { 0.5f, 0.5f, -0.5f, 1.0f, 1.0f },
-		  { 0.5f, 0.5f, 0.5f, 1.0f, 0.0f },
-		  { 0.5f, 0.5f, 0.5f, 1.0f, 0.0f },
-		  { 0.5f, -0.5f, 0.5f, 0.0f, 0.0f },
-		  { 0.5f, -0.5f, -0.5f, 0.0f, 1.0f } } },
+		{ { 0.5f, -0.5f, -0.5f, 1.0f, 1.0f },
+		  { 0.5f, 0.5f, -0.5f, 1.0f, 0.0f },
+		  { 0.5f, 0.5f, 0.5f, 0.0f, 0.0f },
+		  { 0.5f, 0.5f, 0.5f, 0.0f, 0.0f },
+		  { 0.5f, -0.5f, 0.5f, 0.0f, 1.0f },
+		  { 0.5f, -0.5f, -0.5f, 1.0f, 1.0f } } },
 	// BOTTOM
 	{
-		{ { -0.5f, -0.5f, -0.5f, 0.0f, 1.0f },
-		  { 0.5f, -0.5f, -0.5f, 1.0f, 1.0f },
-		  { 0.5f, -0.5f, 0.5f, 1.0f, 0.0f },
-		  { 0.5f, -0.5f, 0.5f, 1.0f, 0.0f },
-		  { -0.5f, -0.5f, 0.5f, 0.0f, 0.0f },
-		  { -0.5f, -0.5f, -0.5f, 0.0f, 1.0f } } },
+		{ { -0.5f, -0.5f, -0.5f, 1.0f, 0.0f },
+		  { 0.5f, -0.5f, -0.5f, 0.0f, 0.0f },
+		  { 0.5f, -0.5f, 0.5f, 0.0f, 1.0f },
+		  { 0.5f, -0.5f, 0.5f, 0.0f, 1.0f },
+		  { -0.5f, -0.5f, 0.5f, 1.0f, 1.0f },
+		  { -0.5f, -0.5f, -0.5f, 1.0f, 0.0f } } },
 	// TOP
 	{
-		{ { 0.5f, 0.5f, 0.5f, 1.0f, 0.0f },
-		  { 0.5f, 0.5f, -0.5f, 1.0f, 1.0f },
-		  { -0.5f, 0.5f, -0.5f, 0.0f, 1.0f },
-		  { -0.5f, 0.5f, -0.5f, 0.0f, 1.0f },
-		  { -0.5f, 0.5f, 0.5f, 0.0f, 0.0f },
-		  { 0.5f, 0.5f, 0.5f, 1.0f, 0.0f } } }
+		{ { 0.5f, 0.5f, 0.5f, 1.0f, 1.0f },
+		  { 0.5f, 0.5f, -0.5f, 1.0f, 0.0f },
+		  { -0.5f, 0.5f, -0.5f, 0.0f, 0.0f },
+		  { -0.5f, 0.5f, -0.5f, 0.0f, 0.0f },
+		  { -0.5f, 0.5f, 0.5f, 0.0f, 1.0f },
+		  { 0.5f, 0.5f, 0.5f, 1.0f, 1.0f } } }
 };
-
 unsigned int indices[] = {
 	0, 1, 3,
 	1, 2, 3
@@ -455,7 +454,7 @@ bool load_image(Image *img, const char *path)
 	int width = 0;
 	int height = 0;
 	int nrChannels = 0;
-	stbi_set_flip_vertically_on_load(true);
+	// stbi_set_flip_vertically_on_load(true);
 	FILE *file = fopen(path, "rb");
 	if (file == NULL) {
 		VERROR("Could not open file: %s", path);
@@ -539,8 +538,9 @@ static void get_tile_uv(int tileX, int tileY, float local_u, float local_v, floa
 
 	float pixel_u = tileX * TEXTURE_TILE_SIZE + adjusted_u * TEXTURE_TILE_SIZE;
 	float pixel_v = tileY * TEXTURE_TILE_SIZE + adjusted_v * TEXTURE_TILE_SIZE;
+
 	*u = pixel_u / TEXTURE_ATLAS_SIZE;
-	*v = 1.0f - (pixel_v / TEXTURE_ATLAS_SIZE);
+	*v = pixel_v / TEXTURE_ATLAS_SIZE;
 }
 
 void texture_get_uv_vertex(float local_u, float local_v, BLOCKTYPE type, CubeFace face, float *u, float *v)
@@ -556,7 +556,41 @@ void texture_get_uv_vertex(float local_u, float local_v, BLOCKTYPE type, CubeFac
 	};
 
 	TextureCoords coords = texture_map[type][face];
+	// float adjusted_u = local_u;
+	// float adjusted_v = local_v;
+	//
+	// // Grass side textures need rotation for proper orientation
+	// if (type == BlocktypeGrass && (face >= FACE_BACK && face <= FACE_RIGHT)) {
+	// 	// For side faces of grass blocks, rotate UVs
+	// 	switch (face) {
+	// 	case FACE_BACK:
+	// 		// Back face: rotate 180 degrees
+	// 		adjusted_u = 1.0f - local_u;
+	// 		adjusted_v = 1.0f - local_v;
+	// 		break;
+	// 	case FACE_FRONT:
+	// 		// Front face: no rotation needed (already correct)
+	// 		adjusted_u = local_v;
+	// 		adjusted_v =  1.0f -local_u;
+	// 		break;
+	// 	case FACE_LEFT:
+	// 		// Left face: rotate -90 degrees
+	// 		adjusted_u = local_v;
+	// 		adjusted_v = 1.0f - local_u;
+	// 		break;
+	// 	case FACE_RIGHT:
+	// 		// Right face: rotate 90 degrees
+	// 		adjusted_u = 1.0f - local_v;
+	// 		adjusted_v = 1.0f -local_u;
+	// 		break;
+	// 	default:
+	// 		break;
+	// 	}
+	// }
+	// For non-grass blocks or top/bottom faces, use standard orientation
+	// (You might need similar adjustments for other block types)
 
+	// get_tile_uv(coords.tileX, coords.tileY, adjusted_u, adjusted_v, u, v);
 	get_tile_uv(coords.tileX, coords.tileY, local_u, local_v, u, v);
 }
 
@@ -993,7 +1027,7 @@ void world_init(World *world)
 	// world->unloaded.chunk = calloc(world->unloaded.cap, sizeof(Chunk));
 	// VASSERT(world->unloaded.chunk != NULL);
 
-	rendermap_init(&world->render_map, 4096, 2);
+	rendermap_init(&world->render_map, 1024, 2);
 
 	pool_reserve(&world->pool, world->pool.cap);
 
