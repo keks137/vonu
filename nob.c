@@ -11,6 +11,7 @@ void append_source_files(Nob_Cmd *cmd)
 	nob_cc_inputs(cmd, SRC_DIR "main.c");
 	nob_cc_inputs(cmd, SRC_DIR "atlas.c");
 	nob_cc_inputs(cmd, SRC_DIR "logs.c");
+	nob_cc_inputs(cmd, SRC_DIR "map.c");
 	nob_cc_inputs(cmd, SRC_DIR "loadopengl.c");
 }
 void linux_mingw_glfw_flags(Nob_Cmd *cmd)

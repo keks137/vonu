@@ -13,11 +13,17 @@
 #include "../vendor/cglm/cglm.h"
 #include "image.h"
 #include "chunk.h"
+#include "map.h"
 #include "pool.h"
 
 #include "verts/vert1.c"
 #include "frags/frag1.c"
 
+const char *BlockTypeString[] = {
+#define X(name) #name,
+	BLOCKTYPE_NAMES
+#undef X
+};
 typedef struct {
 	unsigned int program;
 	unsigned int model_loc;
@@ -39,6 +45,13 @@ typedef struct {
 #define RENDER_DISTANCE_Z 4
 #define MAX_VISIBLE_CHUNKS (2 * RENDER_DISTANCE_X + 1) * (2 * RENDER_DISTANCE_Y + 1) * (2 * RENDER_DISTANCE_Z + 1)
 
+/* #define FOR_CHUNKS_IN_RENDERDISTANCE(...)                                             \
+// 	for (int z = -RENDER_DISTANCE_Z; z <= RENDER_DISTANCE_Z; z++)                 \
+// 		for (int y = -RENDER_DISTANCE_Y; y <= RENDER_DISTANCE_Y; y++)         \
+// 			for (int x = -RENDER_DISTANCE_X; x <= RENDER_DISTANCE_X; x++) \
+// 	__VA_ARGS__
+*/
+
 typedef struct {
 	WorldCoord pos;
 	ChunkCoord chunk_pos;
@@ -46,7 +59,8 @@ typedef struct {
 
 typedef struct {
 	ChunkPool pool;
-	ChunkPoolUnloaded unloaded;
+	RenderMap render_map;
+	// ChunkPoolUnloaded unloaded;
 	size_t chunk_count;
 	Player player;
 } World;
@@ -625,11 +639,13 @@ void chunk_generate_terrain(Chunk *chunk)
 	VASSERT(chunk->data != NULL);
 	// VINFO("Generating terrain: %i %i %i", chunk->coord.x, chunk->coord.y, chunk->coord.z);
 
+	srand(time(NULL));
 	if (chunk->coord.y == 0) {
 		for (size_t z = 0; z < CHUNK_TOTAL_Z; z++) {
 			for (size_t y = 0; y < CHUNK_TOTAL_Y; y++) {
 				for (size_t x = 0; x < CHUNK_TOTAL_X; x++) {
-					if (y < 5) {
+					size_t y_lim = 1 + rand() % 20;
+					if (y < y_lim) {
 						chunk->contains_blocks = true;
 						chunk->data[CHUNK_INDEX(x, y, z)].type = BlocktypeGrass;
 						chunk->data[CHUNK_INDEX(x, y, z)].obstructing = true;
@@ -654,6 +670,9 @@ void chunk_load(Chunk *chunk, ChunkCoord coord)
 
 bool pool_find_chunk_coord(ChunkPool *pool, ChunkCoord coord, size_t *index)
 {
+	size_t idx;
+	if (index == NULL)
+		index = &idx;
 	for (size_t i = 0; i < pool->lvl; i++) {
 		Chunk *pc = &pool->chunk[i];
 		if (pc->coord.x == coord.x &&
@@ -770,12 +789,12 @@ size_t pool_add(ChunkPool *pool, ChunkCoord coord)
 	}
 }
 
-void pool_remove(ChunkPool *pool, size_t index)
-{
-	VASSERT(pool->lvl > index);
-	pool->lvl--;
-	pool->chunk[index] = pool->chunk[pool->lvl];
-}
+// void pool_remove(ChunkPool *pool, size_t index)
+// {
+// 	VASSERT(pool->lvl > index);
+// 	pool->lvl--;
+// 	pool->chunk[index] = pool->chunk[pool->lvl];
+// }
 
 size_t poolunloaded_append(ChunkPoolUnloaded *unloaded, Chunk chunk)
 {
@@ -821,10 +840,23 @@ size_t poolunloaded_add(ChunkPoolUnloaded *unloaded, Chunk chunk)
 		return index;
 	}
 }
+void pool_empty(ChunkPool *pool, size_t index)
+{
+	VASSERT(pool->lvl > index);
+	// TODO: store completely empty chunks somewhere else, since they don't need a VBO anyways
+	VASSERT_MSG(pool->chunk[index].up_to_date || !pool->chunk[index].contains_blocks, "There was no reason to unload this");
+
+	pool->lvl--;
+	Chunk replacement = pool->chunk[pool->lvl];
+	pool->chunk[pool->lvl].data = pool->chunk[index].data;
+	pool->chunk[index] = replacement;
+	// print_chunk(&pool->chunk[index]);
+}
 
 size_t pool_unload(ChunkPool *pool, ChunkPoolUnloaded *unloaded, size_t index)
 {
 	VASSERT(pool->lvl > index);
+	// TODO: store completely empty chunks somewhere else, since they don't need a VBO anyways
 	VASSERT_MSG(pool->chunk[index].up_to_date || !pool->chunk[index].contains_blocks, "There was no reason to unload this");
 
 	Chunk tmp = pool->chunk[index];
@@ -858,9 +890,9 @@ size_t pool_find_unloadable(ChunkPool *pool, ChunkPoolUnloaded *unloaded)
 	return count;
 }
 
-bool pool_load_relaxed(ChunkPool *pool, ChunkPoolUnloaded *unloaded, ChunkCoord coord, size_t *index)
+bool pool_load_relaxed(ChunkPool *pool, RenderMap *map, ChunkCoord coord, size_t *index)
 {
-	if (poolunloaded_find_chunk_coord(unloaded, coord, index)) {
+	if (rendermap_find(map, &coord, index)) {
 		return true;
 	}
 	if (pool_find_chunk_coord(pool, coord, index)) {
@@ -888,36 +920,63 @@ size_t pool_load(ChunkPool *pool, ChunkPoolUnloaded *unloaded, ChunkCoord coord)
 	return pool_add(pool, coord);
 }
 
+typedef struct {
+	ChunkCoord coord;
+	int64_t x_min, x_max, y_min, y_max, z_min, z_max;
+} ChunkIterator;
+
+bool next_chunk(ChunkIterator *it)
+{
+	if (++it->coord.x > it->x_max) {
+		it->coord.x = it->x_min;
+		if (++it->coord.y > it->y_max) {
+			it->coord.y = it->y_min;
+			if (++it->coord.z > it->z_max) {
+				return false;
+			}
+		}
+	}
+	return true;
+}
+
 void world_init(World *world)
 {
 	world->pool.cap = 128;
 	world->pool.chunk = calloc(world->pool.cap, sizeof(Chunk));
 	VASSERT(world->pool.chunk != NULL);
 	// world->pool.unloaded.cap = 512;
-	world->unloaded.cap = 1024;
-	world->unloaded.lvl = 0;
-	world->unloaded.chunk = calloc(world->unloaded.cap, sizeof(Chunk));
-	VASSERT(world->unloaded.chunk != NULL);
+	// world->unloaded.cap = 1024;
+	// world->unloaded.lvl = 0;
+	// world->unloaded.chunk = calloc(world->unloaded.cap, sizeof(Chunk));
+	// VASSERT(world->unloaded.chunk != NULL);
+
+	rendermap_init(&world->render_map, 2048, 2);
 
 	pool_reserve(&world->pool, world->pool.cap);
 
 	size_t pl = 0;
+	ChunkIterator it = {
+		.coord.x = -RENDER_DISTANCE_X,
+		.x_min = -RENDER_DISTANCE_X,
+		.x_max = RENDER_DISTANCE_X,
+		.coord.y = -RENDER_DISTANCE_Y,
+		.y_min = -RENDER_DISTANCE_Y,
+		.y_max = RENDER_DISTANCE_Y,
+		.coord.z = -RENDER_DISTANCE_Z,
+		.z_min = -RENDER_DISTANCE_Z,
+		.z_max = RENDER_DISTANCE_Z
+	};
 
-	for (int z = -RENDER_DISTANCE_Z; z <= RENDER_DISTANCE_Z; z++) {
-		for (int y = -RENDER_DISTANCE_Y; y <= RENDER_DISTANCE_Y; y++) {
-			for (int x = -RENDER_DISTANCE_X; x <= RENDER_DISTANCE_X; x++) {
-				if (pl == world->pool.lvl)
-					goto done;
+	do {
+		ChunkCoord coord = { it.coord.x, it.coord.y, it.coord.z };
+		if (pl == world->pool.lvl)
+			goto done;
+		chunk_load(&world->pool.chunk[pl], coord);
+		pl++;
+	} while (next_chunk(&it));
+	chunk_load(&world->pool.chunk[0], (ChunkCoord){ 0, 0, 0 });
 
-				ChunkCoord coord = { x, y, z };
-
-				chunk_load(&world->pool.chunk[pl], coord);
-				pl++;
-			}
-		}
-	}
-
-	// pool_load(&world->pool, (ChunkCoord){ 0, 0, 0 });
+// pool_load(&world->pool, (ChunkCoord){ 0, 0, 0 });
 done:
 	return;
 }
@@ -928,12 +987,33 @@ void world_render(World *world, TmpChunkVerts *tmp_chunk_verts, ShaderData shade
 		VASSERT(world->pool.chunk[i].data != NULL);
 		chunk_generate_mesh(&world->pool.chunk[i], tmp_chunk_verts);
 
-		chunk_render(&world->pool.chunk[i], shader_data);
+		rendermap_add(&world->render_map, &world->pool.chunk[i]);
+		pool_empty(&world->pool, i);
+		// print_pool(&world->pool);
+		// chunk_render(&world->pool.chunk[i], shader_data);
 	}
 
-	for (size_t i = 0; i < world->unloaded.lvl; i++) {
-		chunk_render(&world->unloaded.chunk[i], shader_data);
+	for (int z = -RENDER_DISTANCE_Z; z <= RENDER_DISTANCE_Z; z++) {
+		for (int y = -RENDER_DISTANCE_Y; y <= RENDER_DISTANCE_Y; y++) {
+			for (int x = -RENDER_DISTANCE_X; x <= RENDER_DISTANCE_X; x++) {
+				ChunkCoord coord = {
+					world->player.chunk_pos.x + x,
+					world->player.chunk_pos.y + y,
+					world->player.chunk_pos.z + z
+				};
+				Chunk chunk = { 0 };
+				if (rendermap_get_chunk(&world->render_map, &chunk, &coord)) {
+					// VINFO("hi");
+					// print_chunk(&chunk);
+					chunk_render(&chunk, shader_data);
+				}
+			}
+		}
 	}
+
+	// for (size_t i = 0; i < world->unloaded.lvl; i++) {
+	// 	chunk_render(&world->unloaded.chunk[i], shader_data);
+	// }
 	// ChunkCoord player_chunk = world_coord_to_chunk(world->player.pos);
 	// VINFO("Player coords: %i %i %i", player_chunk.x, player_chunk.y, player_chunk.z);
 }
@@ -944,11 +1024,43 @@ void print_poolunloaded(ChunkPoolUnloaded *pool)
 	VINFO("cap: %zu", pool->cap);
 }
 
+void rendermap_keep_only_in_range(RenderMap *map)
+{
+	ChunkIterator it = {
+		.coord.x = -RENDER_DISTANCE_X,
+		.x_min = -RENDER_DISTANCE_X,
+		.x_max = RENDER_DISTANCE_X,
+		.coord.y = -RENDER_DISTANCE_Y,
+		.y_min = -RENDER_DISTANCE_Y,
+		.y_max = RENDER_DISTANCE_Y,
+		.coord.z = -RENDER_DISTANCE_Z,
+		.z_min = -RENDER_DISTANCE_Z,
+		.z_max = RENDER_DISTANCE_Z
+	};
+
+	do {
+		Chunk chunk = { 0 };
+		if (rendermap_get_chunk(map, &chunk, &(ChunkCoord){ it.coord.x, it.coord.y, it.coord.z })) {
+			rendermap_add_next_buffer(map, &chunk);
+		}
+		rendermap_advance_buffer(map);
+	} while (next_chunk(&it));
+}
+
+void rendermap_clean_maybe(RenderMap *map)
+{
+	if (map->count > 1.5f * MAX_VISIBLE_CHUNKS) {
+		rendermap_keep_only_in_range(map);
+	}
+}
+
 void world_update(World *world)
 {
-	size_t num = pool_find_unloadable(&world->pool, &world->unloaded);
+	rendermap_clean_maybe(&world->render_map);
+	// size_t num = pool_find_unloadable(&world->pool, &world->unloaded);
+	// VINFO("Num unloaded: %zu", num);
 	// VINFO("==========================================");
-	// print_poolunloaded(&world->pool.unloaded);
+	// print_poolunloaded(&world->unloaded);
 
 	// if (world->pool.lvl < world->pool.cap) {
 	// TODO: something better (or separate thread)
@@ -966,10 +1078,9 @@ void world_update(World *world)
 					world->player.chunk_pos.z + z
 				};
 
-				// VINFO("Trying to load: %i %i %i", coord.x, coord.y, coord.z);
 				size_t index;
-				if (pool_load_relaxed(&world->pool, &world->unloaded, coord, &index)) {
-				};
+				pool_load_relaxed(&world->pool, &world->render_map, coord, &index);
+				// VINFO("Trying to load: %i %i %i", coord.x, coord.y, coord.z);
 				// VINFO("Loaded index: %i", index);
 			}
 		}
@@ -988,10 +1099,12 @@ void print_pool(ChunkPool *pool)
 	VINFO("Pool: %p", pool);
 	VINFO("lvl: %zu", pool->lvl);
 	VINFO("cap: %zu", pool->cap);
+#if 0
 	for (size_t i = 0; i < pool->lvl; i++) {
 		VINFO("Chunk index: %zu", i);
 		print_chunk(&pool->chunk[i]);
 	}
+#endif
 }
 
 typedef struct {
@@ -1055,7 +1168,7 @@ int main()
 	WindowData window = { 0 };
 	window.width = 1080;
 	window.height = 800;
-	window.glfw = glfwCreateWindow(window.width, window.height, "Hello GLFW", NULL, NULL);
+	window.glfw = glfwCreateWindow(window.width, window.height, "Vonu", NULL, NULL);
 	if (!window.glfw) {
 		glfwTerminate();
 		exit(1);

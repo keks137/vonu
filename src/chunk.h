@@ -17,11 +17,7 @@ typedef enum {
 #undef X
 } BLOCKTYPE;
 
-const char *BlockTypeString[] = {
-#define X(name) #name,
-	BLOCKTYPE_NAMES
-#undef X
-};
+extern const char *BlockTypeString[];
 
 typedef struct {
 	BLOCKTYPE type;
@@ -62,5 +58,7 @@ typedef struct {
 } Chunk;
 
 void print_chunk(Chunk *chunk);
+void chunk_free(Chunk *chunk);
+
 
 #endif // INCLUDE_SRC_CHUNK_H_
