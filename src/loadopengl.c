@@ -7,6 +7,7 @@
 		return false;                         \
 	}
 
+PFNGLTEXPARAMETERFVPROC glTexParameterfv = NULL;
 PFNGLDELETEVERTEXARRAYSPROC glDeleteVertexArrays = NULL;
 PFNGLVIEWPORTPROC glViewport = NULL;
 PFNGLCLEARCOLORPROC glClearColor = NULL;
@@ -88,6 +89,7 @@ bool load_gl_functions()
 	LOAD_GL_FUNC(PFNGLVIEWPORTPROC, glViewport);
 	LOAD_GL_FUNC(PFNGLDELETEBUFFERSPROC, glDeleteBuffers);
 	LOAD_GL_FUNC(PFNGLDELETEVERTEXARRAYSPROC, glDeleteVertexArrays);
+	LOAD_GL_FUNC(PFNGLTEXPARAMETERFVPROC,glTexParameterfv);
 
 	return true;
 }

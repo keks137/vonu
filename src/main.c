@@ -522,19 +522,61 @@ void vec3_assign(vec3 v, float x, float y, float z)
 	v[1] = y;
 	v[2] = z;
 }
+#define TEXTURE_ATLAS_SIZE 256.0f
+#define TEXTURE_TILE_SIZE 16.0f
 
-void add_face_to_buffer(TmpChunkVerts *buffer, int x, int y, int z, CubeFace face)
+typedef struct {
+	int tileX;
+	int tileY;
+} TextureCoords;
+
+static void get_tile_uv(int tileX, int tileY, float local_u, float local_v, float *u, float *v)
 {
-	FaceVertices *face_verts = &cube_vertices[(int)face];
+	const float epsilon = 0.5f / TEXTURE_TILE_SIZE;
+
+	float adjusted_u = local_u * (1.0f - 2 * epsilon) + epsilon;
+	float adjusted_v = local_v * (1.0f - 2 * epsilon) + epsilon;
+
+	float pixel_u = tileX * TEXTURE_TILE_SIZE + adjusted_u * TEXTURE_TILE_SIZE;
+	float pixel_v = tileY * TEXTURE_TILE_SIZE + adjusted_v * TEXTURE_TILE_SIZE;
+	*u = pixel_u / TEXTURE_ATLAS_SIZE;
+	*v = 1.0f - (pixel_v / TEXTURE_ATLAS_SIZE);
+}
+
+void texture_get_uv_vertex(float local_u, float local_v, BLOCKTYPE type, CubeFace face, float *u, float *v)
+{
+	static const TextureCoords texture_map[256][FACES_PER_CUBE] = {
+		[BlocktypeGrass] = {
+			[FACE_BACK] = { 1, 0 },
+			[FACE_FRONT] = { 1, 0 },
+			[FACE_LEFT] = { 1, 0 },
+			[FACE_RIGHT] = { 1, 0 },
+			[FACE_BOTTOM] = { 2, 0 },
+			[FACE_TOP] = { 0, 0 } }
+	};
+
+	TextureCoords coords = texture_map[type][face];
+
+	get_tile_uv(coords.tileX, coords.tileY, local_u, local_v, u, v);
+}
+
+void add_face_to_buffer(TmpChunkVerts *buffer, int x, int y, int z, BLOCKTYPE type, CubeFace face)
+{
+	FaceVertices *face_verts = &cube_vertices[face];
+
 	for (size_t i = 0; i < VERTICES_PER_FACE; i++) {
-		float px = face_verts->vertices[i][0] + 0.5f + (float)x;
-		float py = face_verts->vertices[i][1] + 0.5f + (float)y;
-		float pz = face_verts->vertices[i][2] + 0.5f + (float)z;
+		float *vertex_data = face_verts->vertices[i];
+		float px = vertex_data[0] + 0.5f + (float)x;
+		float py = vertex_data[1] + 0.5f + (float)y;
+		float pz = vertex_data[2] + 0.5f + (float)z;
 
-		float u = face_verts->vertices[i][3];
-		float v = face_verts->vertices[i][4];
+		float local_u = vertex_data[3];
+		float local_v = vertex_data[4];
 
-		VASSERT_MSG(buffer->fill + FLOATS_PER_VERTEX < CHUNK_TOTAL_VERTICES, "Vertex buffer overflow!");
+		float u, v;
+		texture_get_uv_vertex(local_u, local_v, type, face, &u, &v);
+
+		VASSERT_MSG(buffer->fill + FLOATS_PER_VERTEX <= CHUNK_TOTAL_VERTICES * FLOATS_PER_VERTEX, "Vertex buffer overflow!");
 
 		buffer->data[buffer->fill++] = px;
 		buffer->data[buffer->fill++] = py;
@@ -546,29 +588,30 @@ void add_face_to_buffer(TmpChunkVerts *buffer, int x, int y, int z, CubeFace fac
 
 void add_block_faces_to_buffer(Chunk *chunk, TmpChunkVerts *tmp_chunk_verts, int x, int y, int z)
 {
-	static const vec3 face_offsets[6] = {
-		{ 0, 0, -1 }, // BACK
-		{ 0, 0, 1 }, // FRONT
-		{ -1, 0, 0 }, // LEFT
-		{ 1, 0, 0 }, // RIGHT
-		{ 0, -1, 0 }, // BOTTOM
-		{ 0, 1, 0 } // TOP
+	static const vec3 face_offsets[FACES_PER_CUBE] = {
+		{ 0, 0, -1 },
+		{ 0, 0, 1 },
+		{ -1, 0, 0 },
+		{ 1, 0, 0 },
+		{ 0, -1, 0 },
+		{ 0, 1, 0 }
 	};
 
-	for (CubeFace f = FACE_BACK; f < FACES_PER_CUBE; f++) {
-		int nx = x + face_offsets[f][0];
-		int ny = y + face_offsets[f][1];
-		int nz = z + face_offsets[f][2];
+	Block *block = chunk_xyz_at(chunk, x, y, z);
+	if (!block || !block->obstructing)
+		return;
+
+	for (CubeFace face = FACE_BACK; face <= FACE_TOP; face++) {
+		int nx = x + face_offsets[face][0];
+		int ny = y + face_offsets[face][1];
+		int nz = z + face_offsets[face][2];
 
 		Block *neighbor = chunk_xyz_at(chunk, nx, ny, nz);
-		if (neighbor == NULL) {
-			add_face_to_buffer(tmp_chunk_verts, x, y, z, f);
-		} else if (!neighbor->obstructing) {
-			add_face_to_buffer(tmp_chunk_verts, x, y, z, f);
+		if (!neighbor || !neighbor->obstructing) {
+			add_face_to_buffer(tmp_chunk_verts, x, y, z, block->type, face);
 		}
 	}
 }
-
 void print_block(Block *block)
 {
 	VINFO("Block: %p", block);
@@ -950,7 +993,7 @@ void world_init(World *world)
 	// world->unloaded.chunk = calloc(world->unloaded.cap, sizeof(Chunk));
 	// VASSERT(world->unloaded.chunk != NULL);
 
-	rendermap_init(&world->render_map, 2048, 2);
+	rendermap_init(&world->render_map, 4096, 2);
 
 	pool_reserve(&world->pool, world->pool.cap);
 
@@ -987,8 +1030,11 @@ void world_render(World *world, TmpChunkVerts *tmp_chunk_verts, ShaderData shade
 		VASSERT(world->pool.chunk[i].data != NULL);
 		chunk_generate_mesh(&world->pool.chunk[i], tmp_chunk_verts);
 
+		// TODO: add an empty map for empty chunks
+		// if (world->pool.chunk[i].up_to_date) {
 		rendermap_add(&world->render_map, &world->pool.chunk[i]);
 		pool_empty(&world->pool, i);
+		// }
 		// print_pool(&world->pool);
 		// chunk_render(&world->pool.chunk[i], shader_data);
 	}
@@ -1122,7 +1168,11 @@ void render(GameState *game_state, WindowData window, ShaderData shader_data, Tm
 
 	mat4 projection = { 0 };
 	float aspect = (float)window.width / (float)window.height;
-	glm_perspective(glm_rad(game_state->camera.fov), aspect, 0.1f, 100.0f, projection);
+
+	float chunkRadius = RENDER_DISTANCE_X * CHUNK_TOTAL_X;
+	float farPlane = sqrt(3 * chunkRadius * chunkRadius);
+	// glm_perspective(glm_rad(game_state->camera.fov), aspect, 0.1f, 500.0f, projection);
+	glm_perspective(glm_rad(game_state->camera.fov), aspect, 0.1f, farPlane, projection);
 
 	glClearColor(0.39f, 0.58f, 0.92f, 1.0f);
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -1158,7 +1208,7 @@ int main()
 	glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
 
 	Image imageData = { 0 };
-	if (!load_image(&imageData, "assets/grass_side.png"))
+	if (!load_image(&imageData, "assets/atlas.png"))
 		exit(1);
 	// print_image_info(&imageData);
 	if (!glfwInit()) {
@@ -1179,6 +1229,7 @@ int main()
 		exit(1);
 
 	glEnable(GL_DEPTH_TEST);
+	glEnable(GL_DEPTH_CLAMP);
 
 	glfwSetCursorPosCallback(window.glfw, mouse_callback);
 
@@ -1188,10 +1239,19 @@ int main()
 	glGenTextures(1, &texture);
 	glBindTexture(GL_TEXTURE_2D, texture);
 
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST_MIPMAP_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	// glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST_MIPMAP_NEAREST);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+
+	float borderColor[] = { 0.0f, 0.0f, 0.0f, 0.0f };
+	glTexParameterfv(GL_TEXTURE_2D, GL_TEXTURE_BORDER_COLOR, borderColor);
+
+	// glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	// glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	// glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST_MIPMAP_NEAREST);
+	// glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 	// glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
 	// glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 
@@ -1205,7 +1265,6 @@ int main()
 	}
 
 	glTexImage2D(GL_TEXTURE_2D, 0, format, imageData.width, imageData.height, 0, format, GL_UNSIGNED_BYTE, imageData.data);
-
 	glGenerateMipmap(GL_TEXTURE_2D);
 	stbi_image_free(imageData.data);
 
@@ -1219,7 +1278,7 @@ int main()
 		.fov = 90.0f,
 		.yaw = -00.0f,
 		.pitch = 0.0f,
-		.pos = { 0.0f, 10.0f, 0.0f },
+		.pos = { 0.0f, 30.0f, 0.0f },
 		.up = { 0.0f, 1.0f, 0.0f },
 		.front = { 0.0f, 0.0f, -1.0f },
 	};
