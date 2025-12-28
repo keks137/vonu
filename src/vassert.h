@@ -18,6 +18,7 @@
 #endif //VABORT_DEBUG
 
 void log_assertion_failure(const char *expression, const char *message, const char *file, int32_t line, const char *func);
+void log_assertion_warn(const char *expression, const char *message, const char *file, int32_t line, const char *func);
 
 // for when you want to assert in release builds
 #if defined(__GNUC__) || defined(__clang__)
@@ -47,9 +48,26 @@ void log_assertion_failure(const char *expression, const char *message, const ch
 #ifndef NDEBUG
 #define VASSERT(expr) VASSERT_RELEASE(expr)
 #define VASSERT_MSG(expr, msg) VASSERT_RELEASE_MSG(expr, msg)
+#define VASSERT_WARN(expr)                                                             \
+	do {                                                                           \
+		if (VUNLIKELY(!(expr))) {                                              \
+			log_assertion_warn(#expr, NULL, __FILE__, __LINE__, __func__); \
+		}                                                                      \
+	} while (0)
+#define VASSERT_WARN_MSG(expr, msg)                                                   \
+	do {                                                                          \
+		if (VUNLIKELY(!(expr))) {                                             \
+			log_assertion_warn(#expr, msg, __FILE__, __LINE__, __func__); \
+		}                                                                     \
+	} while (0)
+
 #else
 #define VASSERT(expr) ((void)0)
 #define VASSERT_MSG(expr, msg) ((void)0)
+#define VASSERT_WARN(expr) ((void)0)
+#define VASSERT_WARN_MSG(expr, msg) ((void)0)
+#define VALWAYS(expr) expr
+#define VNEVER(expr) expr
 
 #endif //NDEBUG
 

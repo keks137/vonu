@@ -17,8 +17,5 @@ typedef struct {
 } OGLPool;
 
 void oglpool_init(OGLPool *pool, size_t cap);
-bool oglpool_claim(OGLPool *pool, size_t *index);
-void oglpool_release(OGLPool *pool, size_t index);
-void oglpool_reference(OGLPool *pool, size_t index);
 
 #endif  // INCLUDE_SRC_OGLPOOL_H_

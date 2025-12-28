@@ -62,14 +62,11 @@ typedef struct {
 	bool breaking;
 } Player;
 
-
-
 typedef struct {
 	ChunkPool pool;
 	OGLPool ogl_pool;
 	RenderMap render_map;
 
-	// ChunkPoolUnloaded unloaded;
 	size_t chunk_count;
 	Player player;
 	size_t seed;
@@ -111,85 +108,7 @@ typedef struct {
 	float vertices[VERTICES_PER_FACE][FLOATS_PER_VERTEX];
 } FaceVertices;
 
-#define CHUNK_TOTAL_VERTICES (CHUNK_TOTAL_BLOCKS * FACES_PER_CUBE * FLOATS_PER_VERTEX * VERTICES_PER_FACE)
-
-typedef struct {
-	float *data;
-	size_t fill;
-} TmpChunkVerts;
-
-void clear_tmp_chunk_verts(TmpChunkVerts *tmp_chunk_verts)
-{
-	// memset(tmp_chunk_verts->data, 0, sizeof(float) * tmp_chunk_verts->fill);
-	tmp_chunk_verts->fill = 0;
-}
-
-const size_t CHUNK_STRIDE_Y = (CHUNK_TOTAL_X);
-const size_t CHUNK_STRIDE_Z = (CHUNK_TOTAL_X * CHUNK_TOTAL_Y);
-
-#define CHUNK_INDEX(x, y, z) ((x) + (y) * CHUNK_STRIDE_Y + (z) * CHUNK_STRIDE_Z)
-
 float movement_speed = 5.0f;
-
-ChunkCoord world_coord_to_chunk(const WorldCoord *world)
-{
-	ChunkCoord chunk;
-
-	chunk.x = (world->x >= 0) ? world->x / CHUNK_TOTAL_X : (world->x + 1) / CHUNK_TOTAL_X - 1;
-	chunk.y = (world->y >= 0) ? world->y / CHUNK_TOTAL_Y : (world->y + 1) / CHUNK_TOTAL_Y - 1;
-	chunk.z = (world->z >= 0) ? world->z / CHUNK_TOTAL_Z : (world->z + 1) / CHUNK_TOTAL_Z - 1;
-
-	return chunk;
-}
-
-void world_cord_to_chunk_and_block(const WorldCoord *world, ChunkCoord *chunk, BlockPos *local)
-{
-	*chunk = world_coord_to_chunk(world);
-
-	local->x = ((world->x % CHUNK_TOTAL_X) + CHUNK_TOTAL_X) % CHUNK_TOTAL_X;
-	local->y = ((world->y % CHUNK_TOTAL_Y) + CHUNK_TOTAL_Y) % CHUNK_TOTAL_Y;
-	local->z = ((world->z % CHUNK_TOTAL_Z) + CHUNK_TOTAL_Z) % CHUNK_TOTAL_Z;
-}
-
-Chunk chunk_callocrash()
-{
-	Chunk chunk = { 0 };
-	chunk.data = calloc(CHUNK_TOTAL_BLOCKS, sizeof(Block));
-	VASSERT_RELEASE_MSG(chunk.data != NULL, "Buy more ram for more chunks bozo");
-
-	// chunk_init(&chunk);
-
-	return chunk;
-}
-
-BlockPos chunk_index_to_blockpos(size_t index)
-{
-	BlockPos pos = { 0 };
-	pos.x = index % CHUNK_TOTAL_X;
-	index /= CHUNK_TOTAL_X;
-	pos.y = index % CHUNK_TOTAL_Y;
-	pos.z = index / CHUNK_TOTAL_Y;
-	return pos;
-}
-
-Block *chunk_xyz_at(const Chunk *chunk, int x, int y, int z)
-{
-	if (x < 0 || x >= CHUNK_TOTAL_X ||
-	    y < 0 || y >= CHUNK_TOTAL_Y ||
-	    z < 0 || z >= CHUNK_TOTAL_Z) {
-		return NULL;
-	}
-
-	return &chunk->data[CHUNK_INDEX(x, y, z)];
-}
-Block *chunk_blockpos_at(const Chunk *chunk, const BlockPos *pos)
-{
-	VASSERT(pos->x < CHUNK_TOTAL_X &&
-		pos->y < CHUNK_TOTAL_Y &&
-		pos->z < CHUNK_TOTAL_Z);
-
-	return &chunk->data[CHUNK_INDEX(pos->x, pos->y, pos->z)];
-}
 
 #define ARRAY_LEN(array) (sizeof(array) / sizeof(array[0]))
 
@@ -552,45 +471,10 @@ void texture_get_uv_vertex(float local_u, float local_v, BLOCKTYPE type, CubeFac
 	};
 
 	TextureCoords coords = texture_map[type][face];
-	// float adjusted_u = local_u;
-	// float adjusted_v = local_v;
-	//
-	// // Grass side textures need rotation for proper orientation
-	// if (type == BlocktypeGrass && (face >= FACE_BACK && face <= FACE_RIGHT)) {
-	// 	// For side faces of grass blocks, rotate UVs
-	// 	switch (face) {
-	// 	case FACE_BACK:
-	// 		// Back face: rotate 180 degrees
-	// 		adjusted_u = 1.0f - local_u;
-	// 		adjusted_v = 1.0f - local_v;
-	// 		break;
-	// 	case FACE_FRONT:
-	// 		// Front face: no rotation needed (already correct)
-	// 		adjusted_u = local_v;
-	// 		adjusted_v =  1.0f -local_u;
-	// 		break;
-	// 	case FACE_LEFT:
-	// 		// Left face: rotate -90 degrees
-	// 		adjusted_u = local_v;
-	// 		adjusted_v = 1.0f - local_u;
-	// 		break;
-	// 	case FACE_RIGHT:
-	// 		// Right face: rotate 90 degrees
-	// 		adjusted_u = 1.0f - local_v;
-	// 		adjusted_v = 1.0f -local_u;
-	// 		break;
-	// 	default:
-	// 		break;
-	// 	}
-	// }
-	// For non-grass blocks or top/bottom faces, use standard orientation
-	// (You might need similar adjustments for other block types)
-
-	// get_tile_uv(coords.tileX, coords.tileY, adjusted_u, adjusted_v, u, v);
 	get_tile_uv(coords.tileX, coords.tileY, local_u, local_v, u, v);
 }
 
-void add_face_to_buffer(TmpChunkVerts *buffer, int x, int y, int z, BLOCKTYPE type, CubeFace face)
+void add_face_to_buffer(ChunkVertsScratch *buffer, int x, int y, int z, BLOCKTYPE type, CubeFace face)
 {
 	FaceVertices *face_verts = &cube_vertices[face];
 
@@ -616,7 +500,7 @@ void add_face_to_buffer(TmpChunkVerts *buffer, int x, int y, int z, BLOCKTYPE ty
 	}
 }
 
-void add_block_faces_to_buffer(Chunk *chunk, TmpChunkVerts *tmp_chunk_verts, int x, int y, int z)
+void add_block_faces_to_buffer(Chunk *chunk, ChunkVertsScratch *tmp_chunk_verts, int x, int y, int z)
 {
 	static const vec3 face_offsets[FACES_PER_CUBE] = {
 		{ 0, 0, -1 },
@@ -649,14 +533,14 @@ void print_block(Block *block)
 	VINFO("Obstructing: %s", block->obstructing ? "true" : "false");
 }
 
-void chunk_generate_mesh(OGLPool *pool, Chunk *chunk, TmpChunkVerts *tmp_chunk_verts)
+void chunk_generate_mesh(OGLPool *pool, Chunk *chunk, ChunkVertsScratch *tmp_chunk_verts)
 {
 	if (chunk->up_to_date || !chunk->contains_blocks)
 		return;
 	VASSERT(chunk->data != NULL);
 
 	chunk->unchanged_render_count = 0;
-	clear_tmp_chunk_verts(tmp_chunk_verts);
+	clear_chunk_verts_scratch(tmp_chunk_verts);
 	for (size_t z = 0; z < CHUNK_TOTAL_Z; z++) {
 		for (size_t y = 0; y < CHUNK_TOTAL_Y; y++) {
 			for (size_t x = 0; x < CHUNK_TOTAL_X; x++) {
@@ -678,8 +562,7 @@ void chunk_generate_mesh(OGLPool *pool, Chunk *chunk, TmpChunkVerts *tmp_chunk_v
 		return;
 	}
 	if (!chunk->has_oglpool_reference) {
-		if (oglpool_claim(pool, &chunk->oglpool_index))
-			chunk->has_oglpool_reference = true;
+		oglpool_claim_chunk(pool, chunk);
 	}
 	VASSERT(chunk->has_oglpool_reference);
 	OGLItem *item = &pool->items[chunk->oglpool_index];
@@ -694,300 +577,6 @@ void chunk_generate_mesh(OGLPool *pool, Chunk *chunk, TmpChunkVerts *tmp_chunk_v
 	chunk->has_vbo_data = true;
 
 	chunk->up_to_date = true;
-}
-
-void print_chunk(Chunk *chunk)
-{
-	VINFO("Chunk: %p", chunk);
-	VINFO("Data: %p", chunk->data);
-	VINFO("coords: %i %i %i", chunk->coord.x, chunk->coord.y, chunk->coord.z);
-	VINFO("unchanged_render_count: %i", chunk->unchanged_render_count);
-	VINFO("up_to_date: %s", chunk->up_to_date ? "true" : "false");
-	VINFO("terrain_generated: %s", chunk->terrain_generated ? "true" : "false");
-	VINFO("contains_blocks: %s", chunk->contains_blocks ? "true" : "false");
-	VINFO("vertex_count: %i", chunk->vertex_count);
-	VINFO("cycles_since_update: %i", chunk->cycles_since_update);
-	VINFO("has_oglpool_reference: %s", chunk->has_oglpool_reference ? "true" : "false");
-	// if (chunk->has_oglpool_reference)
-	VINFO("oglpool_index: %i", chunk->oglpool_index);
-}
-
-bool chunk_caught = false;
-Chunk *chunk_to_catch = NULL;
-void chunk_generate_terrain(Chunk *chunk, size_t seed)
-{
-	VASSERT(chunk->data != NULL);
-	// VINFO("Generating terrain: %i %i %i", chunk->coord.x, chunk->coord.y, chunk->coord.z);
-
-	srand(seed);
-	if (chunk->coord.y == 0) {
-		for (size_t z = 0; z < CHUNK_TOTAL_Z; z++) {
-			for (size_t y = 0; y < CHUNK_TOTAL_Y; y++) {
-				size_t y_lim = 1 + rand() % 20;
-				for (size_t x = 0; x < CHUNK_TOTAL_X; x++) {
-					if (y < y_lim) {
-						chunk->contains_blocks = true;
-						chunk->data[CHUNK_INDEX(x, y, z)].type = BlocktypeGrass;
-						chunk->data[CHUNK_INDEX(x, y, z)].obstructing = true;
-					}
-				}
-			}
-		}
-		// VINFO("Generated:");
-		// print_block(&chunk->data[0]);
-	}
-	chunk->terrain_generated = true;
-}
-
-void chunk_load(Chunk *chunk, const ChunkCoord *coord, size_t seed)
-{
-	chunk->last_used = time(NULL);
-	chunk->coord = *coord;
-	memset(chunk->data, 0, sizeof(Block) * CHUNK_TOTAL_BLOCKS);
-	chunk_generate_terrain(chunk, seed);
-}
-
-bool pool_find_chunk_coord(ChunkPool *pool, const ChunkCoord *coord, size_t *index)
-{
-	size_t idx;
-	if (index == NULL)
-		index = &idx;
-	for (size_t i = 0; i < pool->lvl; i++) {
-		Chunk *pc = &pool->chunk[i];
-		if (pc->coord.x == coord->x &&
-		    pc->coord.y == coord->y &&
-		    pc->coord.z == coord->z) {
-			*index = i;
-			return true;
-		}
-	}
-	return false;
-}
-
-bool poolunloaded_find_chunk_coord(ChunkPoolUnloaded *unloaded, ChunkCoord coord, size_t *index)
-{
-	for (size_t i = 0; i < unloaded->lvl; i++) {
-		Chunk *pc = &unloaded->chunk[i];
-		if (pc->coord.x == coord.x &&
-		    pc->coord.y == coord.y &&
-		    pc->coord.z == coord.z) {
-			*index = i;
-			return true;
-		}
-	}
-	return false;
-}
-bool pool_get_index(ChunkPool *pool, Chunk *chunk, size_t *index)
-{
-	for (size_t i = 0; i < pool->lvl; i++) {
-		if (
-			chunk->coord.x == pool->chunk[i].coord.x &&
-			chunk->coord.y == pool->chunk[i].coord.y &&
-			chunk->coord.z == pool->chunk[i].coord.z) {
-			*index = i;
-			return true;
-		}
-	}
-	return false;
-}
-
-size_t pool_replaceable_index(ChunkPool *pool)
-{
-	size_t index = 0;
-	time_t oldest = time(NULL);
-
-	for (size_t i = 0; i < pool->lvl; i++) {
-		Chunk *pc = &pool->chunk[i];
-		if (pc->last_used < oldest) {
-			oldest = pc->last_used;
-			index = i;
-		}
-	}
-
-	return index;
-}
-
-void chunk_clear_metadata(Chunk *chunk)
-{
-	Chunk tmp = { 0 };
-	tmp.data = chunk->data;
-	// tmp.VAO = chunk->VAO;
-	// tmp.VBO = chunk->VBO;
-	// glDeleteBuffers(1, &chunk->VBO);
-	memset(chunk, 0, sizeof(*chunk));
-	// chunk->VAO = tmp.VAO;
-	// chunk->VBO = tmp.VBO;
-	chunk->data = tmp.data;
-}
-void pool_reserve(ChunkPool *pool, size_t num)
-{
-	VASSERT(pool->lvl + num <= pool->cap);
-	pool->blockdata = realloc(pool->blockdata, sizeof(Block) * (pool->lvl + num) * CHUNK_TOTAL_BLOCKS);
-	VASSERT_MSG(pool->blockdata != NULL, "Buy more ram bozo");
-	Block *start_new_blocks = pool->blockdata + sizeof(Block) * CHUNK_TOTAL_BLOCKS * pool->lvl;
-	memset(start_new_blocks, 0, num * sizeof(Block) * CHUNK_TOTAL_BLOCKS);
-
-	for (size_t i = 0; i < num; i++) {
-		Chunk chunk = { 0 };
-		chunk.data = start_new_blocks + i * CHUNK_TOTAL_BLOCKS;
-		pool->chunk[pool->lvl + i] = chunk;
-	}
-	pool->lvl += num;
-}
-size_t pool_append(ChunkPool *pool, const ChunkCoord *coord, size_t seed)
-{
-	VASSERT(pool->lvl < pool->cap);
-	chunk_clear_metadata(&pool->chunk[pool->lvl]);
-	chunk_load(&pool->chunk[pool->lvl], coord, seed);
-	return pool->lvl++;
-}
-
-void pool_replace(ChunkPool *pool, const ChunkCoord *coord, size_t index, size_t seed)
-{
-	VASSERT(pool->lvl > index);
-	chunk_clear_metadata(&pool->chunk[index]);
-	chunk_load(&pool->chunk[index], coord, seed);
-}
-
-size_t pool_add(ChunkPool *pool, const ChunkCoord *coord, size_t seed)
-{
-	if (pool->lvl < pool->cap) {
-		return pool_append(pool, coord, seed);
-	} else {
-		size_t index = pool_replaceable_index(pool);
-		pool_replace(pool, coord, index, seed);
-		return index;
-	}
-}
-
-// void pool_remove(ChunkPool *pool, size_t index)
-// {
-// 	VASSERT(pool->lvl > index);
-// 	pool->lvl--;
-// 	pool->chunk[index] = pool->chunk[pool->lvl];
-// }
-
-size_t poolunloaded_append(ChunkPoolUnloaded *unloaded, Chunk chunk)
-{
-	VASSERT(unloaded->lvl < unloaded->cap);
-	unloaded->chunk[unloaded->lvl] = chunk;
-	return unloaded->lvl++;
-}
-size_t poolunloaded_replaceable_index(ChunkPoolUnloaded *unloaded)
-{
-	size_t index = 0;
-	time_t oldest = time(NULL);
-
-	for (size_t i = 0; i < unloaded->lvl; i++) {
-		Chunk *pc = &unloaded->chunk[i];
-		if (pc->last_used < oldest) {
-			oldest = pc->last_used;
-			index = i;
-		}
-	}
-
-	return index;
-}
-void poolunloaded_remove(ChunkPoolUnloaded *unloaded, size_t index)
-{
-	VASSERT(unloaded->lvl > index);
-
-	unloaded->lvl--;
-	unloaded->chunk[index] = unloaded->chunk[unloaded->lvl];
-}
-void poolunloaded_replace(ChunkPoolUnloaded *unloaded, Chunk chunk, size_t index)
-{
-	VASSERT(unloaded->lvl > index);
-	unloaded->chunk[index] = chunk;
-}
-
-size_t poolunloaded_add(ChunkPoolUnloaded *unloaded, Chunk chunk)
-{
-	if (unloaded->lvl < unloaded->cap) {
-		return poolunloaded_append(unloaded, chunk);
-	} else {
-		size_t index = poolunloaded_replaceable_index(unloaded);
-		poolunloaded_replace(unloaded, chunk, index);
-		return index;
-	}
-}
-void pool_empty(ChunkPool *pool, size_t index)
-{
-	VASSERT(pool->lvl > index);
-	// TODO: store completely empty chunks somewhere else, since they don't need a VBO anyways
-	VASSERT_MSG(pool->chunk[index].up_to_date || !pool->chunk[index].contains_blocks, "There was no reason to unload this");
-
-	pool->lvl--;
-	Chunk replacement = pool->chunk[pool->lvl];
-	pool->chunk[pool->lvl].data = pool->chunk[index].data;
-	pool->chunk[index] = replacement;
-	// print_chunk(&pool->chunk[index]);
-}
-
-size_t pool_unload(ChunkPool *pool, ChunkPoolUnloaded *unloaded, size_t index)
-{
-	VASSERT(pool->lvl > index);
-	// TODO: store completely empty chunks somewhere else, since they don't need a VBO anyways
-	VASSERT_MSG(pool->chunk[index].up_to_date || !pool->chunk[index].contains_blocks, "There was no reason to unload this");
-
-	Chunk tmp = pool->chunk[index];
-
-	tmp.data = NULL;
-
-	size_t unloaded_index = poolunloaded_add(unloaded, tmp);
-
-	pool->lvl--;
-	Chunk replacement = pool->chunk[pool->lvl];
-	pool->chunk[pool->lvl].data = pool->chunk[index].data;
-	pool->chunk[index] = replacement;
-	// print_chunk(&pool->chunk[index]);
-	return unloaded_index;
-}
-// TODO: add some kind of chunk activeness scoring system
-size_t pool_find_unloadable(ChunkPool *pool, ChunkPoolUnloaded *unloaded)
-{
-	size_t count = 0;
-	for (size_t i = 0; i < pool->lvl; i++) {
-		if (pool->chunk[i].unchanged_render_count > 5) {
-			VASSERT(pool->chunk[i].terrain_generated);
-			pool_unload(pool, unloaded, i);
-			count++;
-		} else if (pool->chunk[i].contains_blocks == false) {
-			pool_unload(pool, unloaded, i);
-			count++;
-		}
-	}
-	return count;
-}
-
-bool pool_load_relaxed(ChunkPool *pool, RenderMap *map, const ChunkCoord *coord, size_t *index, size_t seed)
-{
-	if (rendermap_find(map, coord, index)) {
-		return true;
-	}
-	if (pool_find_chunk_coord(pool, coord, index)) {
-		return true;
-	}
-	if (pool->lvl < pool->cap) {
-		*index = pool_append(pool, coord, seed);
-
-		return true;
-	}
-
-	return false;
-}
-
-size_t pool_load(ChunkPool *pool, const ChunkCoord *coord, size_t seed)
-{
-	size_t index = 0;
-
-	// TODO: cache disk chunks in hash set
-
-	if (pool_find_chunk_coord(pool, coord, &index)) {
-		return index;
-	}
-
-	return pool_add(pool, coord, seed);
 }
 
 typedef struct {
@@ -1048,7 +637,7 @@ done:
 	return;
 }
 
-void world_render(World *world, TmpChunkVerts *tmp_chunk_verts, ShaderData shader_data)
+void world_render(World *world, ChunkVertsScratch *tmp_chunk_verts, ShaderData shader_data)
 {
 	for (size_t i = 0; i < world->pool.lvl; i++) {
 		Chunk *chunk = &world->pool.chunk[i];
@@ -1061,11 +650,11 @@ void world_render(World *world, TmpChunkVerts *tmp_chunk_verts, ShaderData shade
 		if (chunk->modified && chunk->contains_blocks) {
 			if (chunk->cycles_since_update > 400) {
 				disk_save(chunk, world->uid);
-				pool_empty(&world->pool, i);
+				pool_empty(&world->pool, &world->ogl_pool, i);
 			}
 			chunk->cycles_since_update++;
 		} else // TODO:dont do this, maybe do keep it around for a while
-			pool_empty(&world->pool, i);
+			pool_empty(&world->pool, &world->ogl_pool, i);
 	}
 
 	for (int z = -RENDER_DISTANCE_Z; z <= RENDER_DISTANCE_Z; z++) {
@@ -1086,17 +675,8 @@ void world_render(World *world, TmpChunkVerts *tmp_chunk_verts, ShaderData shade
 		}
 	}
 
-	// for (size_t i = 0; i < world->unloaded.lvl; i++) {
-	// 	chunk_render(&world->unloaded.chunk[i], shader_data);
-	// }
 	// ChunkCoord player_chunk = world_coord_to_chunk(world->player.pos);
 	// VINFO("Player coords: %i %i %i", player_chunk.x, player_chunk.y, player_chunk.z);
-}
-void print_poolunloaded(ChunkPoolUnloaded *pool)
-{
-	VINFO("PoolUnloaded: %p", pool);
-	VINFO("lvl: %zu", pool->lvl);
-	VINFO("cap: %zu", pool->cap);
 }
 
 void rendermap_keep_only_in_range(RenderMap *map, OGLPool *pool)
@@ -1135,10 +715,6 @@ void rendermap_clean_maybe(RenderMap *map, OGLPool *pool)
 void world_update(World *world)
 {
 	rendermap_clean_maybe(&world->render_map, &world->ogl_pool);
-	// size_t num = pool_find_unloadable(&world->pool, &world->unloaded);
-	// VINFO("Num unloaded: %zu", num);
-	// VINFO("==========================================");
-	// print_poolunloaded(&world->unloaded);
 
 	// if (world->pool.lvl < world->pool.cap) {
 	// TODO: something better (or separate thread)
@@ -1172,25 +748,13 @@ void player_update(Player *player)
 	player->pos.z = floorf(player->camera.pos[2]);
 }
 
-void print_pool(ChunkPool *pool)
-{
-	VINFO("Pool: %p", pool);
-	VINFO("lvl: %zu", pool->lvl);
-	VINFO("cap: %zu", pool->cap);
-#if 0
-	for (size_t i = 0; i < pool->lvl; i++) {
-		VINFO("Chunk index: %zu", i);
-		print_chunk(&pool->chunk[i]);
-	}
-#endif
-}
 
 typedef struct {
 	GLFWwindow *glfw;
 	int width;
 	int height;
 } WindowData;
-void render(GameState *game_state, WindowData window, ShaderData shader_data, TmpChunkVerts tmp_chunk_verts)
+void render(GameState *game_state, WindowData window, ShaderData shader_data, ChunkVertsScratch tmp_chunk_verts)
 {
 	mat4 view;
 
@@ -1218,6 +782,7 @@ void render(GameState *game_state, WindowData window, ShaderData shader_data, Tm
 	// GL_CHECK((void)0);// TODO:reenable
 
 	world_render(&game_state->world, &tmp_chunk_verts, shader_data);
+	// print_pool(&game_state->world.pool);
 
 	glfwSwapBuffers(window.glfw);
 	glfwPollEvents();
@@ -1228,41 +793,18 @@ typedef struct {
 	vec3 direction;
 } Ray;
 
-void pool_update_chunk(ChunkPool *pool, const ChunkCoord *pos, Chunk **chunk, size_t seed)
-{
-	size_t index = pool_load(pool, pos, seed);
-	*chunk = &pool->chunk[index];
-	VASSERT(chunk != NULL);
-	(*chunk)->up_to_date = false;
-	(*chunk)->modified = true;
-	(*chunk)->updates_this_cycle++;
-	(*chunk)->cycles_since_update = 0;
-}
-
-void pool_update_block(ChunkPool *pool, const WorldCoord *pos, Block **block, size_t seed)
-{
-	ChunkCoord chunk_pos = { 0 };
-	BlockPos block_pos = { 0 };
-	world_cord_to_chunk_and_block(pos, &chunk_pos, &block_pos);
-	Chunk *chunk = NULL;
-	pool_update_chunk(pool, &chunk_pos, &chunk, seed);
-	VASSERT(chunk != NULL);
-	VASSERT(chunk->data != NULL);
-	*block = chunk_blockpos_at(chunk, &block_pos);
-}
-
-void player_print_block(Player *player, ChunkPool *pool, size_t seed)
+void player_print_block(Player *player, OGLPool *ogl, RenderMap *map, ChunkPool *pool, size_t seed)
 {
 	Block *block = NULL;
-	pool_update_block(pool, &player->pos, &block, seed);
+	pool_update_block(pool, ogl, map, &player->pos, &block, seed);
 	VINFO("Pos: x: %i, y: %i, z: %i", player->pos.x, player->pos.y, player->pos.z);
 	print_block(block);
 }
-void player_break_block(ChunkPool *pool, const WorldCoord *pos, size_t seed)
+void player_break_block(ChunkPool *pool, OGLPool *ogl, RenderMap *map, const WorldCoord *pos, size_t seed)
 {
 	// TODO: check if player is actually allowed to
 	Block *block = NULL;
-	pool_update_block(pool, pos, &block, seed);
+	pool_update_block(pool, ogl, map, pos, &block, seed);
 	memset(block, 0, sizeof(*block));
 }
 
@@ -1374,7 +916,7 @@ int main()
 	// glfwSetMouseButtonCallback(window.glfw, mouse_button_callback);
 
 	static float tmp_chunk_verts_data[CHUNK_TOTAL_VERTICES];
-	TmpChunkVerts tmp_chunk_verts = { .data = tmp_chunk_verts_data, .fill = 0 };
+	ChunkVertsScratch tmp_chunk_verts = { .data = tmp_chunk_verts_data, .fill = 0 };
 
 	{
 		shader_data.view_loc = glGetUniformLocation(shader_data.program, "view");
@@ -1400,7 +942,7 @@ int main()
 
 		// player_print_block(player, &game_state.world.pool, world->seed);
 		if (player->breaking) {
-			player_break_block(&game_state.world.pool, &player->pos, world->seed);
+			player_break_block(&game_state.world.pool, &game_state.world.ogl_pool, &game_state.world.render_map, &player->pos, world->seed);
 			player->breaking = false;
 		}
 		world_update(world);

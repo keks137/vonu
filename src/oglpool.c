@@ -1,7 +1,9 @@
 #include "oglpool.h"
+#include "chunk.h"
 #include "loadopengl.h"
 #include "logs.h"
 #include "vassert.h"
+#include <stddef.h>
 #include <string.h>
 static void vao_attributes_no_color(unsigned int VAO)
 {
@@ -13,6 +15,7 @@ static void vao_attributes_no_color(unsigned int VAO)
 	glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void *)(3 * sizeof(float)));
 	glEnableVertexAttribArray(1);
 }
+
 static void oglitem_init(OGLItem *item)
 {
 	glGenVertexArrays(1, &item->VAO);
@@ -37,7 +40,7 @@ void oglpool_init(OGLPool *pool, size_t cap)
 		pool->free_count++;
 	}
 }
-bool oglpool_claim(OGLPool *pool, size_t *index)
+static bool oglpool_claim(OGLPool *pool, size_t *index)
 {
 	if (pool->used >= pool->cap) {
 		VERROR("OGLPool full");
@@ -51,7 +54,7 @@ bool oglpool_claim(OGLPool *pool, size_t *index)
 	pool->used++;
 	return true;
 }
-void oglpool_release(OGLPool *pool, size_t index)
+static void oglpool_release(OGLPool *pool, size_t index)
 {
 	VASSERT(pool->items[index].references > 0);
 	pool->items[index].references--;
@@ -66,4 +69,27 @@ void oglpool_reference(OGLPool *pool, size_t index)
 {
 	VASSERT(pool->items[index].references > 0);
 	pool->items[index].references++;
+}
+bool oglpool_claim_chunk(OGLPool *pool, Chunk *chunk)
+{
+	VASSERT(!chunk->has_oglpool_reference);
+	if (oglpool_claim(pool, &chunk->oglpool_index)) {
+		chunk->has_oglpool_reference = true;
+		return true;
+	}
+	return false;
+}
+void oglpool_release_chunk(OGLPool *pool, Chunk *chunk)
+{
+	VASSERT_WARN(chunk->has_oglpool_reference);
+	if (chunk->has_oglpool_reference) {
+		oglpool_release(pool, chunk->oglpool_index);
+		chunk->has_oglpool_reference = false;
+	}
+}
+void oglpool_reference_chunk(OGLPool *pool, Chunk *chunk, size_t index)
+{
+	chunk->oglpool_index = index;
+	chunk->has_oglpool_reference = true;
+	oglpool_reference(pool, chunk->oglpool_index);
 }

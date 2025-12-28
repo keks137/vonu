@@ -18,6 +18,14 @@ void log_assertion_failure(const char *expression, const char *message, const ch
 		log_msgn(LOG_LEVEL_FATAL, "%s:%d: %s: Assertion '%s' failed: '%s'", file, line, func, expression, message);
 	}
 }
+void log_assertion_warn(const char *expression, const char *message, const char *file, int32_t line, const char *func)
+{
+	if (message == NULL) {
+		log_msgn(LOG_LEVEL_WARN, "%s:%d: %s: Assertion '%s' failed", file, line, func, expression);
+	} else {
+		log_msgn(LOG_LEVEL_WARN, "%s:%d: %s: Assertion '%s' failed: '%s'", file, line, func, expression, message);
+	}
+}
 void log_msgn(LOG_LEVEL level, const char *message, ...)
 {
 	bool is_error = level < 2;
