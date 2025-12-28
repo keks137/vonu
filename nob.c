@@ -10,6 +10,7 @@ void append_source_files(Nob_Cmd *cmd)
 {
 	nob_cc_inputs(cmd, SRC_DIR "main.c");
 	nob_cc_inputs(cmd, SRC_DIR "atlas.c");
+	nob_cc_inputs(cmd, SRC_DIR "disk.c");
 	nob_cc_inputs(cmd, SRC_DIR "logs.c");
 	nob_cc_inputs(cmd, SRC_DIR "map.c");
 	nob_cc_inputs(cmd, SRC_DIR "loadopengl.c");
@@ -23,6 +24,7 @@ void linux_mingw_glfw_flags(Nob_Cmd *cmd)
 void linux_glfw_flags(Nob_Cmd *cmd)
 {
 	nob_cmd_append(cmd, "-ggdb");
+	// nob_cmd_append(cmd, "-std=c99");
 	// nob_cmd_append(cmd, "-O2");
 	// nob_cmd_append(cmd, "-fsanitize=address,undefined"); // soo useful
 	nob_cmd_append(cmd, "-DPLATFORM_DESKTOP");

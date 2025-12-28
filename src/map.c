@@ -1,6 +1,9 @@
 #include "map.h"
+#include "chunk.h"
 #include "logs.h"
+#include "vassert.h"
 #include <stddef.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -55,14 +58,17 @@ bool rendermap_get_chunk(RenderMap *map, Chunk *chunk, ChunkCoord *key)
 	return false;
 }
 
-static bool rendermap_add_opt(RenderMap *map, Chunk *chunk, size_t buffer)
+static bool rendermap_add_opt(RenderMap *map, Chunk *chunk, size_t buffer, uint32_t *index)
 {
-	uint32_t idx = triple_hash(map, &chunk->coord);
-	uint32_t start_idx = idx;
+	uint32_t idx;
+	if (index == NULL)
+		index = &idx;
+	*index = triple_hash(map, &chunk->coord);
+	uint32_t start_index = *index;
 	uint8_t off_count = 0;
 
 	do {
-		RenderMapEntry *entry = &map->entry[buffer][idx];
+		RenderMapEntry *entry = &map->entry[buffer][*index];
 
 		if (entry->flags & HashMapFlagDeleted) {
 			memset(entry, 0, sizeof(*entry));
@@ -76,7 +82,14 @@ static bool rendermap_add_opt(RenderMap *map, Chunk *chunk, size_t buffer)
 				if (entry->off_by == off_count)
 					entry->flags |= HashMapFlagCarry;
 
-				if (chunkcoord_match(&map->entry[buffer][idx].chunk.coord, &chunk->coord)) {
+				if (chunkcoord_match(&entry->chunk.coord, &chunk->coord)) {
+					// TODO: maybe reuse it instead
+
+					// VASSERT(entry->chunk.VBO != chunk->VBO);
+					if (entry->chunk.VBO != chunk->VBO)
+						chunk_free(&entry->chunk);
+					entry->chunk = *chunk;
+
 					return true;
 				}
 			} else {
@@ -90,8 +103,8 @@ static bool rendermap_add_opt(RenderMap *map, Chunk *chunk, size_t buffer)
 
 		off_count++;
 
-		idx = (idx + 1) & (map->table_size - 1);
-		if (idx == start_idx)
+		*index = (*index + 1) & (map->table_size - 1);
+		if (*index == start_index)
 			break;
 
 	} while (true);
@@ -101,10 +114,10 @@ static bool rendermap_add_opt(RenderMap *map, Chunk *chunk, size_t buffer)
 }
 bool rendermap_add(RenderMap *map, Chunk *chunk)
 {
-	return rendermap_add_opt(map, chunk, map->current_buffer);
+	return rendermap_add_opt(map, chunk, map->current_buffer, NULL);
 }
 
-bool rendermap_find(const RenderMap *map, ChunkCoord *key, size_t *index)
+bool rendermap_find(const RenderMap *map, const ChunkCoord *key, size_t *index)
 {
 	size_t idx;
 	if (index == NULL)
@@ -158,13 +171,24 @@ bool rendermap_add_next_buffer(RenderMap *map, Chunk *chunk)
 	size_t next_buffer = rendermap_next_buffer(map);
 	map->count_next += map->count - start_count;
 
-	bool ret = rendermap_add_opt(map, chunk, next_buffer);
+	uint32_t index;
+	bool ret = rendermap_add_opt(map, chunk, next_buffer, &index);
+	if (ret)
+		map->entry[next_buffer][index].flags |= HashMapFlagStaysNext;
 	return ret;
 }
 
 void rendermap_advance_buffer(RenderMap *map)
 {
 	RenderMap tmp = *map;
+
+	for (size_t i = 0; i < map->table_size; i++) {
+		RenderMapEntry *entry = &map->entry[map->current_buffer][i];
+		if (entry->chunk.VAO != 0 && !(entry->flags & HashMapFlagStaysNext)) {
+			// chunk_free(&entry->chunk);
+		}
+	}
+
 	memset(map, 0, sizeof(*map));
 	map->entry = tmp.entry;
 	map->table_size = tmp.table_size;

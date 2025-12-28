@@ -6,7 +6,7 @@
 #include <stdint.h>
 #include <time.h>
 
-#define BLOCKTYPE_NAMES    \
+#define BLOCKTYPE_NAMES   \
 	X(BlocktypeAir)   \
 	X(BlocktypeGrass) \
 	X(BlocktypeStone)
@@ -17,6 +17,10 @@ typedef enum {
 #undef X
 } BLOCKTYPE;
 
+#define CHUNK_TOTAL_X 32
+#define CHUNK_TOTAL_Y 32
+#define CHUNK_TOTAL_Z 32
+#define CHUNK_TOTAL_BLOCKS (CHUNK_TOTAL_X * CHUNK_TOTAL_Y * CHUNK_TOTAL_Z)
 extern const char *BlockTypeString[];
 
 typedef struct {
@@ -51,14 +55,15 @@ typedef struct {
 	bool up_to_date;
 	bool initialized;
 	bool terrain_generated;
+	bool modified;
 	bool has_vbo_data;
+	uint64_t updates_this_cycle;
+	uint64_t cycles_since_update;
 	uint64_t unchanged_render_count;
-	bool unloaded;
 	time_t last_used;
 } Chunk;
 
 void print_chunk(Chunk *chunk);
 void chunk_free(Chunk *chunk);
-
 
 #endif // INCLUDE_SRC_CHUNK_H_

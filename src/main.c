@@ -1,4 +1,6 @@
+#include "disk.h"
 #include <GL/glcorearb.h>
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -7,7 +9,6 @@
 #include "logs.h"
 #include <time.h>
 #include "loadopengl.h"
-#include <unistd.h>
 #define STB_IMAGE_IMPLEMENTATION
 #include "../vendor/stb_image.h"
 #include "../vendor/cglm/cglm.h"
@@ -53,8 +54,11 @@ typedef struct {
 */
 
 typedef struct {
+	Camera camera;
 	WorldCoord pos;
 	ChunkCoord chunk_pos;
+	bool placing;
+	bool breaking;
 } Player;
 
 typedef struct {
@@ -63,21 +67,18 @@ typedef struct {
 	// ChunkPoolUnloaded unloaded;
 	size_t chunk_count;
 	Player player;
+	size_t seed;
+	const char *name;
+	const char *uid;
 } World;
 
 typedef struct {
 	World world;
-	Camera camera;
 	float delta_time;
 	float last_frame;
 	bool paused;
 } GameState;
 GameState game_state = { 0 };
-
-#define CHUNK_TOTAL_X 32
-#define CHUNK_TOTAL_Y 32
-#define CHUNK_TOTAL_Z 32
-#define CHUNK_TOTAL_BLOCKS (CHUNK_TOTAL_X * CHUNK_TOTAL_Y * CHUNK_TOTAL_Z)
 
 #define FLOATS_PER_VERTEX 5
 #define VERTICES_PER_FACE 6
@@ -125,24 +126,24 @@ const size_t CHUNK_STRIDE_Z = (CHUNK_TOTAL_X * CHUNK_TOTAL_Y);
 
 float movement_speed = 5.0f;
 
-ChunkCoord world_coord_to_chunk(WorldCoord world)
+ChunkCoord world_coord_to_chunk(const WorldCoord *world)
 {
 	ChunkCoord chunk;
 
-	chunk.x = (world.x >= 0) ? world.x / CHUNK_TOTAL_X : (world.x + 1) / CHUNK_TOTAL_X - 1;
-	chunk.y = (world.y >= 0) ? world.y / CHUNK_TOTAL_Y : (world.y + 1) / CHUNK_TOTAL_Y - 1;
-	chunk.z = (world.z >= 0) ? world.z / CHUNK_TOTAL_Z : (world.z + 1) / CHUNK_TOTAL_Z - 1;
+	chunk.x = (world->x >= 0) ? world->x / CHUNK_TOTAL_X : (world->x + 1) / CHUNK_TOTAL_X - 1;
+	chunk.y = (world->y >= 0) ? world->y / CHUNK_TOTAL_Y : (world->y + 1) / CHUNK_TOTAL_Y - 1;
+	chunk.z = (world->z >= 0) ? world->z / CHUNK_TOTAL_Z : (world->z + 1) / CHUNK_TOTAL_Z - 1;
 
 	return chunk;
 }
 
-void world_cord_to_chunk_and_block(WorldCoord world, ChunkCoord *chunk, BlockPos *local)
+void world_cord_to_chunk_and_block(const WorldCoord *world, ChunkCoord *chunk, BlockPos *local)
 {
 	*chunk = world_coord_to_chunk(world);
 
-	local->x = ((world.x % CHUNK_TOTAL_X) + CHUNK_TOTAL_X) % CHUNK_TOTAL_X;
-	local->y = ((world.y % CHUNK_TOTAL_Y) + CHUNK_TOTAL_Y) % CHUNK_TOTAL_Y;
-	local->z = ((world.z % CHUNK_TOTAL_Z) + CHUNK_TOTAL_Z) % CHUNK_TOTAL_Z;
+	local->x = ((world->x % CHUNK_TOTAL_X) + CHUNK_TOTAL_X) % CHUNK_TOTAL_X;
+	local->y = ((world->y % CHUNK_TOTAL_Y) + CHUNK_TOTAL_Y) % CHUNK_TOTAL_Y;
+	local->z = ((world->z % CHUNK_TOTAL_Z) + CHUNK_TOTAL_Z) % CHUNK_TOTAL_Z;
 }
 void vao_attributes_no_color(unsigned int VAO)
 {
@@ -170,8 +171,9 @@ Chunk chunk_callocrash()
 {
 	Chunk chunk = { 0 };
 	chunk.data = calloc(CHUNK_TOTAL_BLOCKS, sizeof(Block));
-	VASSERT_MSG(chunk.data != NULL, "Buy more ram for more chunks bozo");
+	VASSERT_RELEASE_MSG(chunk.data != NULL, "Buy more ram for more chunks bozo");
 
+	(void)0;
 	chunk_init(&chunk);
 
 	return chunk;
@@ -187,17 +189,23 @@ BlockPos chunk_index_to_blockpos(size_t index)
 	return pos;
 }
 
-Block *chunk_xyz_at(Chunk *chunk, int x, int y, int z)
+Block *chunk_xyz_at(const Chunk *chunk, int x, int y, int z)
 {
 	if (x < 0 || x >= CHUNK_TOTAL_X ||
 	    y < 0 || y >= CHUNK_TOTAL_Y ||
 	    z < 0 || z >= CHUNK_TOTAL_Z) {
-		// VERROR("chunk_xyz_at out of bounds: %i %i %i", x, y, z);
-		// print_chunk(chunk);
 		return NULL;
 	}
 
 	return &chunk->data[CHUNK_INDEX(x, y, z)];
+}
+Block *chunk_blockpos_at(const Chunk *chunk, const BlockPos *pos)
+{
+	VASSERT(pos->x < CHUNK_TOTAL_X &&
+		pos->y < CHUNK_TOTAL_Y &&
+		pos->z < CHUNK_TOTAL_Z);
+
+	return &chunk->data[CHUNK_INDEX(pos->x, pos->y, pos->z)];
 }
 
 #define ARRAY_LEN(array) (sizeof(array) / sizeof(array[0]))
@@ -287,20 +295,21 @@ void mouse_callback(GLFWwindow *window, double xpos, double ypos)
 	xoffset *= sensitivity;
 	yoffset *= sensitivity;
 
-	game_state.camera.yaw += xoffset;
-	game_state.camera.pitch += yoffset;
+	Camera *camera = &game_state.world.player.camera;
+	camera->yaw += xoffset;
+	camera->pitch += yoffset;
 
-	if (game_state.camera.pitch > 89.0f)
-		game_state.camera.pitch = 89.0f;
-	if (game_state.camera.pitch < -89.0f)
-		game_state.camera.pitch = -89.0f;
+	if (camera->pitch > 89.0f)
+		camera->pitch = 89.0f;
+	if (camera->pitch < -89.0f)
+		camera->pitch = -89.0f;
 	vec3 direction = { 0 };
 
-	direction[0] = cos(glm_rad(game_state.camera.yaw)) * cos(glm_rad(game_state.camera.pitch));
-	direction[1] = sin(glm_rad(game_state.camera.pitch));
-	direction[2] = sin(glm_rad(game_state.camera.yaw)) * cos(glm_rad(game_state.camera.pitch));
+	direction[0] = cos(glm_rad(camera->yaw)) * cos(glm_rad(camera->pitch));
+	direction[1] = sin(glm_rad(camera->pitch));
+	direction[2] = sin(glm_rad(camera->yaw)) * cos(glm_rad(camera->pitch));
 	glm_normalize(direction);
-	glm_vec3_copy(direction, game_state.camera.front);
+	glm_vec3_copy(direction, camera->front);
 }
 void framebuffer_size_callback(GLFWwindow *window, int width, int height)
 {
@@ -326,23 +335,8 @@ void window_focus_callback(GLFWwindow *window, int focused)
 		set_paused(window, true);
 	}
 }
-void mouse_button_callback(GLFWwindow *window, int button, int action, int mods)
-{
-	(void)mods;
-	if (game_state.paused) {
-		if (button == GLFW_MOUSE_BUTTON_LEFT && action == GLFW_PRESS) {
-			set_paused(window, false);
-		}
-		if (button == GLFW_MOUSE_BUTTON_RIGHT && action == GLFW_PRESS) {
-			set_paused(window, false);
-		}
-	} else {
-	}
-	// if (button == GLFW_MOUSE_BUTTON_MIDDLE && action == GLFW_PRESS) {
-	// }
-}
 
-void process_input(GLFWwindow *window)
+void process_input(GLFWwindow *window, Player *player)
 {
 	static bool escapeKeyPressedLastFrame = false;
 
@@ -354,15 +348,24 @@ void process_input(GLFWwindow *window)
 
 	escapeKeyPressedLastFrame = escapeKeyPressedThisFrame;
 
-	if (game_state.paused)
-		return;
+	if (game_state.paused) {
+		if (glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS) {
+			set_paused(window, false);
+		}
+		if (glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS) {
+			set_paused(window, false);
+		}
 
+		return;
+	}
+
+	Camera *camera = &player->camera;
 	const float camera_speed = movement_speed * game_state.delta_time;
 	if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS) {
-		game_state.camera.pos[1] += camera_speed;
+		camera->pos[1] += camera_speed;
 	}
 	if (glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS) {
-		game_state.camera.pos[1] -= camera_speed;
+		camera->pos[1] -= camera_speed;
 	}
 	static bool sprinting;
 	float forward_speed = camera_speed;
@@ -373,30 +376,33 @@ void process_input(GLFWwindow *window)
 		forward_speed *= 2;
 
 	vec3 horizontal_front;
-	glm_vec3_copy(game_state.camera.front, horizontal_front);
+	glm_vec3_copy(camera->front, horizontal_front);
 	horizontal_front[1] = 0.0f;
 	glm_normalize(horizontal_front);
 
 	if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) {
-		glm_vec3_muladds(horizontal_front, forward_speed, game_state.camera.pos);
+		glm_vec3_muladds(horizontal_front, forward_speed, camera->pos);
 	} else {
 		sprinting = false;
 	}
 
 	if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) {
-		glm_vec3_mulsubs(horizontal_front, camera_speed, game_state.camera.pos);
+		glm_vec3_mulsubs(horizontal_front, camera_speed, camera->pos);
 	}
 	if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) {
 		vec3 right;
-		glm_cross(horizontal_front, game_state.camera.up, right);
+		glm_cross(horizontal_front, camera->up, right);
 		glm_normalize(right);
-		glm_vec3_mulsubs(right, camera_speed, game_state.camera.pos);
+		glm_vec3_mulsubs(right, camera_speed, camera->pos);
 	}
 	if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) {
 		vec3 right;
-		glm_cross(horizontal_front, game_state.camera.up, right);
+		glm_cross(horizontal_front, camera->up, right);
 		glm_normalize(right);
-		glm_vec3_muladds(right, camera_speed, game_state.camera.pos);
+		glm_vec3_muladds(right, camera_speed, camera->pos);
+	}
+	if (glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS) {
+		player->breaking = true;
 	}
 }
 
@@ -479,23 +485,34 @@ void print_image_info(Image *image)
 	VINFO("n_chan: %zu", image->n_chan);
 }
 
+#define GL_CHECK(stmt)                                                                                            \
+	do {                                                                                                      \
+		stmt;                                                                                             \
+		GLenum err = glGetError();                                                                        \
+		if (err != GL_NO_ERROR) {                                                                         \
+			VERROR("OpenGL error 0x%04X at %s:%d: %s: %s", err, __FILE__, __LINE__, __func__, #stmt); \
+			print_chunk(chunk);                                                                       \
+		}                                                                                                 \
+	} while (0)
+
 void chunk_render(Chunk *chunk, ShaderData shader_data)
 {
-	if (!chunk->up_to_date)
+	if (!chunk->up_to_date || !chunk->initialized)
 		return;
 	if (chunk->vertex_count == 0) {
 		// VERROR("This guy again:");
-		// print_chunk(chunk);
 		return;
 	}
+	// print_chunk(chunk);
 
 	VASSERT_MSG(chunk->contains_blocks, "How did it get here?");
+	VASSERT_MSG(chunk->VBO != 0, "How did it get here?");
 	VASSERT_MSG(chunk->vertex_count > 0, "How did it get here?");
 
 	chunk->unchanged_render_count++;
 
-	glUseProgram(shader_data.program);
-	glBindVertexArray(chunk->VAO);
+	GL_CHECK(glUseProgram(shader_data.program));
+	GL_CHECK(glBindVertexArray(chunk->VAO));
 
 	mat4 model = { 0 };
 	glm_mat4_identity(model);
@@ -503,16 +520,12 @@ void chunk_render(Chunk *chunk, ShaderData shader_data)
 	pos[0] = chunk->coord.x * CHUNK_TOTAL_X;
 	pos[1] = chunk->coord.y * CHUNK_TOTAL_Y;
 	pos[2] = chunk->coord.z * CHUNK_TOTAL_Z;
-	glm_translate(model, pos);
+	GL_CHECK(glm_translate(model, pos));
 
-	glUniformMatrix4fv(shader_data.model_loc, 1, GL_FALSE, (const float *)model);
+	GL_CHECK(glUniformMatrix4fv(shader_data.model_loc, 1, GL_FALSE, (const float *)model));
 
-	glDrawArrays(GL_TRIANGLES, 0, chunk->vertex_count);
-
-	GLenum err;
-	while ((err = glGetError()) != GL_NO_ERROR) {
-		printf("OpenGL error: 0x%04X\n", err);
-	}
+	GL_CHECK(glDrawArrays(GL_TRIANGLES, 0, chunk->vertex_count));
+	// GL_CHECK(print_chunk(chunk));
 }
 
 void vec3_assign(vec3 v, float x, float y, float z)
@@ -679,8 +692,12 @@ void chunk_generate_mesh(Chunk *chunk, TmpChunkVerts *tmp_chunk_verts)
 		VERROR("This guy:");
 		print_chunk(chunk);
 		print_block(&chunk->data[0]);
-		asm("int3");
+		return;
 	}
+	if (!chunk->initialized)
+		chunk_init(chunk);
+	else
+		VINFO("did it again");
 
 	glBindVertexArray(chunk->VAO);
 	glBindBuffer(GL_ARRAY_BUFFER, chunk->VBO);
@@ -705,23 +722,23 @@ void print_chunk(Chunk *chunk)
 	VINFO("terrain_generated: %s", chunk->terrain_generated ? "true" : "false");
 	VINFO("contains_blocks: %s", chunk->contains_blocks ? "true" : "false");
 	VINFO("initialized: %s", chunk->initialized ? "true" : "false");
-	VINFO("unloaded: %s", chunk->unloaded ? "true" : "false");
 	VINFO("vertex_count: %i", chunk->vertex_count);
+	VINFO("cycles_since_update: %i", chunk->cycles_since_update);
 }
 
 bool chunk_caught = false;
 Chunk *chunk_to_catch = NULL;
-void chunk_generate_terrain(Chunk *chunk)
+void chunk_generate_terrain(Chunk *chunk, size_t seed)
 {
 	VASSERT(chunk->data != NULL);
 	// VINFO("Generating terrain: %i %i %i", chunk->coord.x, chunk->coord.y, chunk->coord.z);
 
-	srand(time(NULL));
+	srand(seed);
 	if (chunk->coord.y == 0) {
 		for (size_t z = 0; z < CHUNK_TOTAL_Z; z++) {
 			for (size_t y = 0; y < CHUNK_TOTAL_Y; y++) {
+				size_t y_lim = 1 + rand() % 20;
 				for (size_t x = 0; x < CHUNK_TOTAL_X; x++) {
-					size_t y_lim = 1 + rand() % 20;
 					if (y < y_lim) {
 						chunk->contains_blocks = true;
 						chunk->data[CHUNK_INDEX(x, y, z)].type = BlocktypeGrass;
@@ -736,25 +753,24 @@ void chunk_generate_terrain(Chunk *chunk)
 	chunk->terrain_generated = true;
 }
 
-void chunk_load(Chunk *chunk, ChunkCoord coord)
+void chunk_load(Chunk *chunk, const ChunkCoord *coord, size_t seed)
 {
-	chunk_init(chunk);
 	chunk->last_used = time(NULL);
-	chunk->coord = coord;
+	chunk->coord = *coord;
 	memset(chunk->data, 0, sizeof(Block) * CHUNK_TOTAL_BLOCKS);
-	chunk_generate_terrain(chunk);
+	chunk_generate_terrain(chunk, seed);
 }
 
-bool pool_find_chunk_coord(ChunkPool *pool, ChunkCoord coord, size_t *index)
+bool pool_find_chunk_coord(ChunkPool *pool, const ChunkCoord *coord, size_t *index)
 {
 	size_t idx;
 	if (index == NULL)
 		index = &idx;
 	for (size_t i = 0; i < pool->lvl; i++) {
 		Chunk *pc = &pool->chunk[i];
-		if (pc->coord.x == coord.x &&
-		    pc->coord.y == coord.y &&
-		    pc->coord.z == coord.z) {
+		if (pc->coord.x == coord->x &&
+		    pc->coord.y == coord->y &&
+		    pc->coord.z == coord->z) {
 			*index = i;
 			return true;
 		}
@@ -807,9 +823,11 @@ size_t pool_replaceable_index(ChunkPool *pool)
 
 void chunk_free(Chunk *chunk)
 {
+	VASSERT(chunk->initialized);
 	VASSERT(chunk->VAO != 0 && chunk->VBO != 0);
+	// VINFO("deleted:");
+	// print_chunk(chunk);
 	glDeleteVertexArrays(1, &chunk->VAO);
-	// if (chunk->has_vbo_data)
 	glDeleteBuffers(1, &chunk->VBO);
 }
 
@@ -840,28 +858,28 @@ void pool_reserve(ChunkPool *pool, size_t num)
 	}
 	pool->lvl += num;
 }
-size_t pool_append(ChunkPool *pool, ChunkCoord coord)
+size_t pool_append(ChunkPool *pool, const ChunkCoord *coord, size_t seed)
 {
 	VASSERT(pool->lvl < pool->cap);
 	chunk_clear_metadata(&pool->chunk[pool->lvl]);
-	chunk_load(&pool->chunk[pool->lvl], coord);
+	chunk_load(&pool->chunk[pool->lvl], coord, seed);
 	return pool->lvl++;
 }
 
-void pool_replace(ChunkPool *pool, ChunkCoord coord, size_t index)
+void pool_replace(ChunkPool *pool, const ChunkCoord *coord, size_t index, size_t seed)
 {
 	VASSERT(pool->lvl > index);
 	chunk_clear_metadata(&pool->chunk[index]);
-	chunk_load(&pool->chunk[index], coord);
+	chunk_load(&pool->chunk[index], coord, seed);
 }
 
-size_t pool_add(ChunkPool *pool, ChunkCoord coord)
+size_t pool_add(ChunkPool *pool, const ChunkCoord *coord, size_t seed)
 {
 	if (pool->lvl < pool->cap) {
-		return pool_append(pool, coord);
+		return pool_append(pool, coord, seed);
 	} else {
 		size_t index = pool_replaceable_index(pool);
-		pool_replace(pool, coord, index);
+		pool_replace(pool, coord, index, seed);
 		return index;
 	}
 }
@@ -939,7 +957,6 @@ size_t pool_unload(ChunkPool *pool, ChunkPoolUnloaded *unloaded, size_t index)
 	Chunk tmp = pool->chunk[index];
 
 	tmp.data = NULL;
-	tmp.unloaded = true;
 
 	size_t unloaded_index = poolunloaded_add(unloaded, tmp);
 
@@ -967,34 +984,34 @@ size_t pool_find_unloadable(ChunkPool *pool, ChunkPoolUnloaded *unloaded)
 	return count;
 }
 
-bool pool_load_relaxed(ChunkPool *pool, RenderMap *map, ChunkCoord coord, size_t *index)
+bool pool_load_relaxed(ChunkPool *pool, RenderMap *map, const ChunkCoord *coord, size_t *index, size_t seed)
 {
-	if (rendermap_find(map, &coord, index)) {
+	if (rendermap_find(map, coord, index)) {
 		return true;
 	}
 	if (pool_find_chunk_coord(pool, coord, index)) {
 		return true;
 	}
 	if (pool->lvl < pool->cap) {
-		*index = pool_append(pool, coord);
+		*index = pool_append(pool, coord, seed);
+
 		return true;
 	}
 
 	return false;
 }
 
-size_t pool_load(ChunkPool *pool, ChunkPoolUnloaded *unloaded, ChunkCoord coord)
+size_t pool_load(ChunkPool *pool, const ChunkCoord *coord, size_t seed)
 {
 	size_t index = 0;
 
-	if (poolunloaded_find_chunk_coord(unloaded, coord, &index)) {
-		return index;
-	}
+	// TODO: cache disk chunks in hash set
+
 	if (pool_find_chunk_coord(pool, coord, &index)) {
 		return index;
 	}
 
-	return pool_add(pool, coord);
+	return pool_add(pool, coord, seed);
 }
 
 typedef struct {
@@ -1020,14 +1037,9 @@ void world_init(World *world)
 {
 	world->pool.cap = 128;
 	world->pool.chunk = calloc(world->pool.cap, sizeof(Chunk));
-	VASSERT(world->pool.chunk != NULL);
-	// world->pool.unloaded.cap = 512;
-	// world->unloaded.cap = 1024;
-	// world->unloaded.lvl = 0;
-	// world->unloaded.chunk = calloc(world->unloaded.cap, sizeof(Chunk));
-	// VASSERT(world->unloaded.chunk != NULL);
+	VASSERT_RELEASE_MSG(world->pool.chunk != NULL, "Buy more RAM");
 
-	rendermap_init(&world->render_map, 1024, 2);
+	rendermap_init(&world->render_map, 2 * 2048, 2);
 
 	pool_reserve(&world->pool, world->pool.cap);
 
@@ -1044,14 +1056,15 @@ void world_init(World *world)
 		.z_max = RENDER_DISTANCE_Z
 	};
 
+	world->seed = time(NULL);
 	do {
 		ChunkCoord coord = { it.coord.x, it.coord.y, it.coord.z };
 		if (pl == world->pool.lvl)
 			goto done;
-		chunk_load(&world->pool.chunk[pl], coord);
+		chunk_load(&world->pool.chunk[pl], &coord, world->seed);
 		pl++;
 	} while (next_chunk(&it));
-	chunk_load(&world->pool.chunk[0], (ChunkCoord){ 0, 0, 0 });
+	chunk_load(&world->pool.chunk[0], &(ChunkCoord){ 0, 0, 0 }, world->seed);
 
 // pool_load(&world->pool, (ChunkCoord){ 0, 0, 0 });
 done:
@@ -1061,16 +1074,21 @@ done:
 void world_render(World *world, TmpChunkVerts *tmp_chunk_verts, ShaderData shader_data)
 {
 	for (size_t i = 0; i < world->pool.lvl; i++) {
-		VASSERT(world->pool.chunk[i].data != NULL);
-		chunk_generate_mesh(&world->pool.chunk[i], tmp_chunk_verts);
+		Chunk *chunk = &world->pool.chunk[i];
+		VASSERT(chunk->data != NULL);
+		chunk_generate_mesh(chunk, tmp_chunk_verts);
 
 		// TODO: add an empty map for empty chunks
 		// if (world->pool.chunk[i].up_to_date) {
-		rendermap_add(&world->render_map, &world->pool.chunk[i]);
-		pool_empty(&world->pool, i);
-		// }
-		// print_pool(&world->pool);
-		// chunk_render(&world->pool.chunk[i], shader_data);
+		rendermap_add(&world->render_map, chunk);
+		if (chunk->modified && chunk->contains_blocks) {
+			if (chunk->cycles_since_update > 400) {
+				disk_save(chunk, world->uid);
+				pool_empty(&world->pool, i);
+			}
+			chunk->cycles_since_update++;
+		} else // TODO:dont do this, maybe do keep it around for a while
+			pool_empty(&world->pool, i);
 	}
 
 	for (int z = -RENDER_DISTANCE_Z; z <= RENDER_DISTANCE_Z; z++) {
@@ -1132,6 +1150,9 @@ void rendermap_clean_maybe(RenderMap *map)
 	if (map->count > 1.5f * MAX_VISIBLE_CHUNKS) {
 		rendermap_keep_only_in_range(map);
 	}
+	if (map->count > .75f * map->table_size) {
+		rendermap_keep_only_in_range(map);
+	}
 }
 
 void world_update(World *world)
@@ -1144,7 +1165,7 @@ void world_update(World *world)
 
 	// if (world->pool.lvl < world->pool.cap) {
 	// TODO: something better (or separate thread)
-	ChunkCoord new_chunk = world_coord_to_chunk(world->player.pos);
+	ChunkCoord new_chunk = world_coord_to_chunk(&world->player.pos);
 	// if (new_chunk.x != world->player.chunk_pos.x ||
 	//     new_chunk.y != world->player.chunk_pos.y ||
 	//     new_chunk.z != world->player.chunk_pos.z) {
@@ -1159,7 +1180,7 @@ void world_update(World *world)
 				};
 
 				size_t index;
-				pool_load_relaxed(&world->pool, &world->render_map, coord, &index);
+				pool_load_relaxed(&world->pool, &world->render_map, &coord, &index, world->seed);
 				// VINFO("Trying to load: %i %i %i", coord.x, coord.y, coord.z);
 				// VINFO("Loaded index: %i", index);
 			}
@@ -1167,11 +1188,11 @@ void world_update(World *world)
 	}
 	// }
 }
-void player_update(Player *player, Camera *camera)
+void player_update(Player *player)
 {
-	player->pos.x = floorf(camera->pos[0]);
-	player->pos.y = floorf(camera->pos[1]);
-	player->pos.z = floorf(camera->pos[2]);
+	player->pos.x = floorf(player->camera.pos[0]);
+	player->pos.y = floorf(player->camera.pos[1]) - 1;
+	player->pos.z = floorf(player->camera.pos[2]);
 }
 
 void print_pool(ChunkPool *pool)
@@ -1197,8 +1218,10 @@ void render(GameState *game_state, WindowData window, ShaderData shader_data, Tm
 	mat4 view;
 
 	vec3 camera_pos_plus_front;
-	glm_vec3_add(game_state->camera.pos, game_state->camera.front, camera_pos_plus_front);
-	glm_lookat(game_state->camera.pos, camera_pos_plus_front, game_state->camera.up, view);
+	Camera *camera = &game_state->world.player.camera;
+
+	glm_vec3_add(camera->pos, camera->front, camera_pos_plus_front);
+	glm_lookat(camera->pos, camera_pos_plus_front, camera->up, view);
 
 	mat4 projection = { 0 };
 	float aspect = (float)window.width / (float)window.height;
@@ -1206,7 +1229,7 @@ void render(GameState *game_state, WindowData window, ShaderData shader_data, Tm
 	float chunkRadius = RENDER_DISTANCE_X * CHUNK_TOTAL_X;
 	float farPlane = sqrt(3 * chunkRadius * chunkRadius);
 	// glm_perspective(glm_rad(game_state->camera.fov), aspect, 0.1f, 500.0f, projection);
-	glm_perspective(glm_rad(game_state->camera.fov), aspect, 0.1f, farPlane, projection);
+	glm_perspective(glm_rad(camera->fov), aspect, 0.1f, farPlane, projection);
 
 	glClearColor(0.39f, 0.58f, 0.92f, 1.0f);
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -1215,24 +1238,55 @@ void render(GameState *game_state, WindowData window, ShaderData shader_data, Tm
 
 	glUniformMatrix4fv(shader_data.projection_loc, 1, GL_FALSE, (const float *)projection);
 
-	GLenum err;
-	while ((err = glGetError()) != GL_NO_ERROR) {
-		VERROR("OpenGL error: 0x%04X", err);
-	}
+	// GL_CHECK((void)0);// TODO:reenable
 
-	// Chunk chunk = chunk_callocrash();
-	// chunk_load(&chunk, (ChunkCoord){ 5, 0, 0 });
-	// chunk_generate_terrain(&chunk);
-	// chunk_generate_mesh(&chunk, &tmp_chunk_verts);
-	// chunk_render(&chunk, shader_data);
-	// chunk_free(&chunk);
-
-	// print_pool(&game_state->world.pool);
 	world_render(&game_state->world, &tmp_chunk_verts, shader_data);
-	// VWARN("not drawing world");
 
 	glfwSwapBuffers(window.glfw);
 	glfwPollEvents();
+}
+
+typedef struct {
+	vec3 origin;
+	vec3 direction;
+} Ray;
+
+void pool_update_chunk(ChunkPool *pool, const ChunkCoord *pos, Chunk **chunk, size_t seed)
+{
+	size_t index = pool_load(pool, pos, seed);
+	*chunk = &pool->chunk[index];
+	VASSERT(chunk != NULL);
+	(*chunk)->up_to_date = false;
+	(*chunk)->modified = true;
+	(*chunk)->updates_this_cycle++;
+	(*chunk)->cycles_since_update = 0;
+}
+
+void pool_update_block(ChunkPool *pool, const WorldCoord *pos, Block **block, size_t seed)
+{
+	ChunkCoord chunk_pos = { 0 };
+	BlockPos block_pos = { 0 };
+	world_cord_to_chunk_and_block(pos, &chunk_pos, &block_pos);
+	Chunk *chunk = NULL;
+	pool_update_chunk(pool, &chunk_pos, &chunk, seed);
+	VASSERT(chunk != NULL);
+	VASSERT(chunk->data != NULL);
+	*block = chunk_blockpos_at(chunk, &block_pos);
+}
+
+void player_print_block(Player *player, ChunkPool *pool, size_t seed)
+{
+	Block *block = NULL;
+	pool_update_block(pool, &player->pos, &block, seed);
+	VINFO("Pos: x: %i, y: %i, z: %i", player->pos.x, player->pos.y, player->pos.z);
+	print_block(block);
+}
+void player_break_block(ChunkPool *pool, const WorldCoord *pos, size_t seed)
+{
+	// TODO: check if player is actually allowed to
+	Block *block = NULL;
+	pool_update_block(pool, pos, &block, seed);
+	memset(block, 0, sizeof(*block));
 }
 
 int main()
@@ -1308,7 +1362,7 @@ int main()
 	if (!create_shader_program(&shader_data.program, vertexShaderSource, fragmentShaderSource))
 		exit(1);
 
-	game_state.camera = (Camera){
+	game_state.world.player.camera = (Camera){
 		.fov = 90.0f,
 		.yaw = -00.0f,
 		.pitch = 0.0f,
@@ -1324,7 +1378,14 @@ int main()
 
 	// glfwSwapInterval(0); // no vsync
 
-	world_init(&game_state.world);
+	World *world = &game_state.world;
+	world_init(world);
+
+	{
+		static char *uid = "hi";
+		world->uid = uid;
+	}
+	disk_init(world->uid);
 
 	glUseProgram(shader_data.program);
 	glUniform1i(glGetUniformLocation(shader_data.program, "texture1"), 0);
@@ -1333,7 +1394,7 @@ int main()
 
 	glfwSetInputMode(window.glfw, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
 	glfwSetWindowFocusCallback(window.glfw, window_focus_callback);
-	glfwSetMouseButtonCallback(window.glfw, mouse_button_callback);
+	// glfwSetMouseButtonCallback(window.glfw, mouse_button_callback);
 
 	static float tmp_chunk_verts_data[CHUNK_TOTAL_VERTICES];
 	TmpChunkVerts tmp_chunk_verts = { .data = tmp_chunk_verts_data, .fill = 0 };
@@ -1344,6 +1405,7 @@ int main()
 		shader_data.model_loc = glGetUniformLocation(shader_data.program, "model");
 	}
 
+	Player *player = &world->player;
 	while (!glfwWindowShouldClose(window.glfw)) {
 		float current_frame = glfwGetTime();
 		game_state.delta_time = current_frame - game_state.last_frame;
@@ -1351,15 +1413,20 @@ int main()
 
 		// VINFO("FPS: %f",1/game_state.delta_time);
 
-		process_input(window.glfw);
+		process_input(window.glfw, player);
 
 		if (game_state.paused) {
 			glfwWaitEvents();
 			continue;
 		}
+		player_update(player);
 
-		player_update(&game_state.world.player, &game_state.camera);
-		world_update(&game_state.world);
+		// player_print_block(player, &game_state.world.pool, world->seed);
+		if (player->breaking) {
+			player_break_block(&game_state.world.pool, &player->pos, world->seed);
+			player->breaking = false;
+		}
+		world_update(world);
 
 		render(&game_state, window, shader_data, tmp_chunk_verts);
 	}

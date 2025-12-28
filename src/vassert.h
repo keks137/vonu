@@ -1,6 +1,8 @@
 #ifndef INCLUDE_SRC_ASSERTS_H_
 #define INCLUDE_SRC_ASSERTS_H_
 
+#include <stdint.h>
+#include <stdlib.h>
 
 #ifdef VABORT_DEBUG
 #if _MSC_VER
@@ -15,24 +17,53 @@
 #define VABORT() abort()
 #endif //VABORT_DEBUG
 
-#include <stdint.h>
-void log_assertion_failure(const char *expression, const char *message, const char *file, int32_t line);
+void log_assertion_failure(const char *expression, const char *message, const char *file, int32_t line, const char *func);
 
-#define VASSERT(expr)                                                           \
-	do {                                                                    \
-		if (expr) {                                                     \
-		} else {                                                        \
-			log_assertion_failure(#expr, NULL, __FILE__, __LINE__); \
-			VABORT();                                               \
-		}                                                               \
+// for when you want to assert in release builds
+#if defined(__GNUC__) || defined(__clang__)
+#define VLIKELY(x) __builtin_expect(!!(x), 1)
+#define VUNLIKELY(x) __builtin_expect(!!(x), 0)
+#else
+#define VLIKELY(x) (x)
+#define VUNLIKELY(x) (x)
+#endif
+
+#define VASSERT_RELEASE(expr)                                                             \
+	do {                                                                              \
+		if (VUNLIKELY(!(expr))) {                                                 \
+			log_assertion_failure(#expr, NULL, __FILE__, __LINE__, __func__); \
+			VABORT();                                                         \
+		}                                                                         \
 	} while (0)
-#define VASSERT_MSG(expr, msg)                                                 \
-	do {                                                                   \
-		if (expr) {                                                    \
-		} else {                                                       \
-			log_assertion_failure(#expr, msg, __FILE__, __LINE__); \
-			VABORT();                                              \
-		}                                                              \
+
+#define VASSERT_RELEASE_MSG(expr, msg)                                                   \
+	do {                                                                             \
+		if (VUNLIKELY(!(expr))) {                                                \
+			log_assertion_failure(#expr, msg, __FILE__, __LINE__, __func__); \
+			VABORT();                                                        \
+		}                                                                        \
 	} while (0)
+
+#ifndef NDEBUG
+#define VASSERT(expr) VASSERT_RELEASE(expr)
+#define VASSERT_MSG(expr, msg) VASSERT_RELEASE_MSG(expr, msg)
+#else
+#define VASSERT(expr) ((void)0)
+#define VASSERT_MSG(expr, msg) ((void)0)
+
+#endif //NDEBUG
+
+#if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+#define VASSERT_STATIC(expr, msg) _Static_assert(expr, msg)
+
+#elif defined(__cplusplus) && __cplusplus >= 201103L
+#define VASSERT_STATIC(expr, msg) static_assert(expr, msg)
+
+#else
+#define VASSERT_STATIC(expr, msg) \
+	typedef char VASSERT_STATIC_##__LINE__[(expr) ? 1 : -1]
+#endif
+
+#define VASSERT_STATIC_NOMSG(expr) VASSERT_STATIC(expr, "static assertion failed")
 
 #endif // INCLUDE_SRC_ASSERTS_H_

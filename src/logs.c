@@ -10,12 +10,12 @@ static const char *level_strings[6] = { "[FATAL]: ", "[ERROR]: ", "[WARN]: ", "[
 
 #define LOG_MAX_MESSAGE_LEN 1024
 
-void log_assertion_failure(const char *expression, const char *message, const char *file, int32_t line)
+void log_assertion_failure(const char *expression, const char *message, const char *file, int32_t line, const char *func)
 {
 	if (message == NULL) {
-		log_msgn(LOG_LEVEL_FATAL, "%s:%d: Assertion '%s' failed", file, line, expression);
+		log_msgn(LOG_LEVEL_FATAL, "%s:%d: %s: Assertion '%s' failed", file, line, func, expression);
 	} else {
-		log_msgn(LOG_LEVEL_FATAL, "%s:%d: Assertion '%s' failed: '%s'", file, line, expression, message);
+		log_msgn(LOG_LEVEL_FATAL, "%s:%d: %s: Assertion '%s' failed: '%s'", file, line, func, expression, message);
 	}
 }
 void log_msgn(LOG_LEVEL level, const char *message, ...)
