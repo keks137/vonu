@@ -135,7 +135,7 @@ void print_pool(ChunkPool *pool)
 	}
 #endif
 }
-void pool_update_block(ChunkPool *pool, OGLPool *ogl, RenderMap *map, const WorldCoord *pos, Block **block, size_t seed)
+void pool_update_block(ChunkPool *pool, OGLPool *ogl, RenderMap *map, const WorldCoord *pos, Block **block, size_t seed, bool now_contains_blocks)
 {
 	ChunkCoord chunk_pos = { 0 };
 	BlockPos block_pos = { 0 };
@@ -145,6 +145,8 @@ void pool_update_block(ChunkPool *pool, OGLPool *ogl, RenderMap *map, const Worl
 	VASSERT(chunk != NULL);
 	VASSERT(chunk->data != NULL);
 	*block = chunk_blockpos_at(chunk, &block_pos);
+	if (now_contains_blocks)
+		chunk->contains_blocks = true;
 }
 
 bool pool_add(ChunkPool *pool, size_t *index, const ChunkCoord *coord, size_t seed)

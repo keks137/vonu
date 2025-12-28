@@ -306,6 +306,9 @@ void process_input(GLFWwindow *window, Player *player)
 	if (glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS) {
 		player->breaking = true;
 	}
+	if (glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS) {
+		player->placing = true;
+	}
 }
 
 bool verify_shader(unsigned int shader)
@@ -748,7 +751,6 @@ void player_update(Player *player)
 	player->pos.z = floorf(player->camera.pos[2]);
 }
 
-
 typedef struct {
 	GLFWwindow *glfw;
 	int width;
@@ -796,7 +798,7 @@ typedef struct {
 void player_print_block(Player *player, OGLPool *ogl, RenderMap *map, ChunkPool *pool, size_t seed)
 {
 	Block *block = NULL;
-	pool_update_block(pool, ogl, map, &player->pos, &block, seed);
+	pool_update_block(pool, ogl, map, &player->pos, &block, seed, false);
 	VINFO("Pos: x: %i, y: %i, z: %i", player->pos.x, player->pos.y, player->pos.z);
 	print_block(block);
 }
@@ -804,8 +806,17 @@ void player_break_block(ChunkPool *pool, OGLPool *ogl, RenderMap *map, const Wor
 {
 	// TODO: check if player is actually allowed to
 	Block *block = NULL;
-	pool_update_block(pool, ogl, map, pos, &block, seed);
+	pool_update_block(pool, ogl, map, pos, &block, seed, false);
 	memset(block, 0, sizeof(*block));
+}
+void player_place_block(ChunkPool *pool, OGLPool *ogl, RenderMap *map, const WorldCoord *pos, size_t seed)
+{
+	// TODO: check if player is actually allowed to
+	Block *block = NULL;
+	pool_update_block(pool, ogl, map, pos, &block, seed, true);
+	memset(block, 0, sizeof(*block));
+	block->obstructing = true;
+	block->type = BlocktypeGrass;
 }
 
 int main()
@@ -944,6 +955,10 @@ int main()
 		if (player->breaking) {
 			player_break_block(&game_state.world.pool, &game_state.world.ogl_pool, &game_state.world.render_map, &player->pos, world->seed);
 			player->breaking = false;
+		}
+		if (player->placing) {
+			player_place_block(&game_state.world.pool, &game_state.world.ogl_pool, &game_state.world.render_map, &player->pos, world->seed);
+			player->placing = false;
 		}
 		world_update(world);
 
