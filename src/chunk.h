@@ -48,12 +48,13 @@ typedef struct {
 typedef struct {
 	Block *data;
 	ChunkCoord coord;
-	unsigned int VAO;
-	unsigned int VBO;
+	// unsigned int VAO;
+	// unsigned int VBO;
+	size_t oglpool_index;
+	bool has_oglpool_reference;
 	size_t vertex_count;
 	bool contains_blocks;
 	bool up_to_date;
-	bool initialized;
 	bool terrain_generated;
 	bool modified;
 	bool has_vbo_data;

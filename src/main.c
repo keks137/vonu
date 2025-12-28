@@ -16,6 +16,7 @@
 #include "chunk.h"
 #include "map.h"
 #include "pool.h"
+#include "oglpool.h"
 
 #include "verts/vert1.c"
 #include "frags/frag1.c"
@@ -61,9 +62,13 @@ typedef struct {
 	bool breaking;
 } Player;
 
+
+
 typedef struct {
 	ChunkPool pool;
+	OGLPool ogl_pool;
 	RenderMap render_map;
+
 	// ChunkPoolUnloaded unloaded;
 	size_t chunk_count;
 	Player player;
@@ -145,27 +150,6 @@ void world_cord_to_chunk_and_block(const WorldCoord *world, ChunkCoord *chunk, B
 	local->y = ((world->y % CHUNK_TOTAL_Y) + CHUNK_TOTAL_Y) % CHUNK_TOTAL_Y;
 	local->z = ((world->z % CHUNK_TOTAL_Z) + CHUNK_TOTAL_Z) % CHUNK_TOTAL_Z;
 }
-void vao_attributes_no_color(unsigned int VAO)
-{
-	glBindVertexArray(VAO);
-
-	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void *)0);
-	glEnableVertexAttribArray(0);
-
-	glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void *)(3 * sizeof(float)));
-	glEnableVertexAttribArray(1);
-}
-
-void chunk_init(Chunk *chunk)
-{
-	glGenVertexArrays(1, &chunk->VAO);
-	glGenBuffers(1, &chunk->VBO);
-
-	glBindVertexArray(chunk->VAO);
-	glBindBuffer(GL_ARRAY_BUFFER, chunk->VBO);
-	vao_attributes_no_color(chunk->VAO);
-	chunk->initialized = true;
-}
 
 Chunk chunk_callocrash()
 {
@@ -173,8 +157,7 @@ Chunk chunk_callocrash()
 	chunk.data = calloc(CHUNK_TOTAL_BLOCKS, sizeof(Block));
 	VASSERT_RELEASE_MSG(chunk.data != NULL, "Buy more ram for more chunks bozo");
 
-	(void)0;
-	chunk_init(&chunk);
+	// chunk_init(&chunk);
 
 	return chunk;
 }
@@ -495,9 +478,9 @@ void print_image_info(Image *image)
 		}                                                                                                 \
 	} while (0)
 
-void chunk_render(Chunk *chunk, ShaderData shader_data)
+void chunk_render(OGLPool *pool, Chunk *chunk, ShaderData shader_data)
 {
-	if (!chunk->up_to_date || !chunk->initialized)
+	if (!chunk->up_to_date || !chunk->has_oglpool_reference)
 		return;
 	if (chunk->vertex_count == 0) {
 		// VERROR("This guy again:");
@@ -506,13 +489,13 @@ void chunk_render(Chunk *chunk, ShaderData shader_data)
 	// print_chunk(chunk);
 
 	VASSERT_MSG(chunk->contains_blocks, "How did it get here?");
-	VASSERT_MSG(chunk->VBO != 0, "How did it get here?");
+	VASSERT_MSG(pool->items[chunk->oglpool_index].references > 0, "How did it get here?");
 	VASSERT_MSG(chunk->vertex_count > 0, "How did it get here?");
 
 	chunk->unchanged_render_count++;
 
 	GL_CHECK(glUseProgram(shader_data.program));
-	GL_CHECK(glBindVertexArray(chunk->VAO));
+	GL_CHECK(glBindVertexArray(pool->items[chunk->oglpool_index].VAO));
 
 	mat4 model = { 0 };
 	glm_mat4_identity(model);
@@ -666,7 +649,7 @@ void print_block(Block *block)
 	VINFO("Obstructing: %s", block->obstructing ? "true" : "false");
 }
 
-void chunk_generate_mesh(Chunk *chunk, TmpChunkVerts *tmp_chunk_verts)
+void chunk_generate_mesh(OGLPool *pool, Chunk *chunk, TmpChunkVerts *tmp_chunk_verts)
 {
 	if (chunk->up_to_date || !chunk->contains_blocks)
 		return;
@@ -694,17 +677,20 @@ void chunk_generate_mesh(Chunk *chunk, TmpChunkVerts *tmp_chunk_verts)
 		print_block(&chunk->data[0]);
 		return;
 	}
-	if (!chunk->initialized)
-		chunk_init(chunk);
-	else
-		VINFO("did it again");
+	if (!chunk->has_oglpool_reference) {
+		if (oglpool_claim(pool, &chunk->oglpool_index))
+			chunk->has_oglpool_reference = true;
+	}
+	VASSERT(chunk->has_oglpool_reference);
+	OGLItem *item = &pool->items[chunk->oglpool_index];
+	VASSERT_MSG(item->references > 0, "How did it get here?");
 
-	glBindVertexArray(chunk->VAO);
-	glBindBuffer(GL_ARRAY_BUFFER, chunk->VBO);
+	glBindVertexArray(item->VAO);
+	glBindBuffer(GL_ARRAY_BUFFER, item->VBO);
 	glBufferData(GL_ARRAY_BUFFER,
 		     tmp_chunk_verts->fill * sizeof(float),
 		     tmp_chunk_verts->data,
-		     GL_DYNAMIC_DRAW);
+		     chunk->updates_this_cycle > 2 ? GL_DYNAMIC_DRAW : GL_STATIC_DRAW);
 	chunk->has_vbo_data = true;
 
 	chunk->up_to_date = true;
@@ -715,15 +701,15 @@ void print_chunk(Chunk *chunk)
 	VINFO("Chunk: %p", chunk);
 	VINFO("Data: %p", chunk->data);
 	VINFO("coords: %i %i %i", chunk->coord.x, chunk->coord.y, chunk->coord.z);
-	VINFO("VAO: %i", chunk->VAO);
-	VINFO("VBO: %i", chunk->VBO);
 	VINFO("unchanged_render_count: %i", chunk->unchanged_render_count);
 	VINFO("up_to_date: %s", chunk->up_to_date ? "true" : "false");
 	VINFO("terrain_generated: %s", chunk->terrain_generated ? "true" : "false");
 	VINFO("contains_blocks: %s", chunk->contains_blocks ? "true" : "false");
-	VINFO("initialized: %s", chunk->initialized ? "true" : "false");
 	VINFO("vertex_count: %i", chunk->vertex_count);
 	VINFO("cycles_since_update: %i", chunk->cycles_since_update);
+	VINFO("has_oglpool_reference: %s", chunk->has_oglpool_reference ? "true" : "false");
+	// if (chunk->has_oglpool_reference)
+	VINFO("oglpool_index: %i", chunk->oglpool_index);
 }
 
 bool chunk_caught = false;
@@ -819,16 +805,6 @@ size_t pool_replaceable_index(ChunkPool *pool)
 	}
 
 	return index;
-}
-
-void chunk_free(Chunk *chunk)
-{
-	VASSERT(chunk->initialized);
-	VASSERT(chunk->VAO != 0 && chunk->VBO != 0);
-	// VINFO("deleted:");
-	// print_chunk(chunk);
-	glDeleteVertexArrays(1, &chunk->VAO);
-	glDeleteBuffers(1, &chunk->VBO);
 }
 
 void chunk_clear_metadata(Chunk *chunk)
@@ -1039,6 +1015,7 @@ void world_init(World *world)
 	world->pool.chunk = calloc(world->pool.cap, sizeof(Chunk));
 	VASSERT_RELEASE_MSG(world->pool.chunk != NULL, "Buy more RAM");
 
+	oglpool_init(&world->ogl_pool, MAX_VISIBLE_CHUNKS * 2);
 	rendermap_init(&world->render_map, 2 * 2048, 2);
 
 	pool_reserve(&world->pool, world->pool.cap);
@@ -1076,11 +1053,11 @@ void world_render(World *world, TmpChunkVerts *tmp_chunk_verts, ShaderData shade
 	for (size_t i = 0; i < world->pool.lvl; i++) {
 		Chunk *chunk = &world->pool.chunk[i];
 		VASSERT(chunk->data != NULL);
-		chunk_generate_mesh(chunk, tmp_chunk_verts);
+		chunk_generate_mesh(&world->ogl_pool, chunk, tmp_chunk_verts);
 
 		// TODO: add an empty map for empty chunks
 		// if (world->pool.chunk[i].up_to_date) {
-		rendermap_add(&world->render_map, chunk);
+		rendermap_add(&world->render_map, &world->ogl_pool, chunk);
 		if (chunk->modified && chunk->contains_blocks) {
 			if (chunk->cycles_since_update > 400) {
 				disk_save(chunk, world->uid);
@@ -1103,7 +1080,7 @@ void world_render(World *world, TmpChunkVerts *tmp_chunk_verts, ShaderData shade
 				if (rendermap_get_chunk(&world->render_map, &chunk, &coord)) {
 					// VINFO("hi");
 					// print_chunk(&chunk);
-					chunk_render(&chunk, shader_data);
+					chunk_render(&world->ogl_pool, &chunk, shader_data);
 				}
 			}
 		}
@@ -1122,7 +1099,7 @@ void print_poolunloaded(ChunkPoolUnloaded *pool)
 	VINFO("cap: %zu", pool->cap);
 }
 
-void rendermap_keep_only_in_range(RenderMap *map)
+void rendermap_keep_only_in_range(RenderMap *map, OGLPool *pool)
 {
 	ChunkIterator it = {
 		.coord.x = -RENDER_DISTANCE_X,
@@ -1139,25 +1116,25 @@ void rendermap_keep_only_in_range(RenderMap *map)
 	do {
 		Chunk chunk = { 0 };
 		if (rendermap_get_chunk(map, &chunk, &(ChunkCoord){ it.coord.x, it.coord.y, it.coord.z })) {
-			rendermap_add_next_buffer(map, &chunk);
+			rendermap_add_next_buffer(map, pool, &chunk);
 		}
-		rendermap_advance_buffer(map);
+		rendermap_advance_buffer(map, pool);
 	} while (next_chunk(&it));
 }
 
-void rendermap_clean_maybe(RenderMap *map)
+void rendermap_clean_maybe(RenderMap *map, OGLPool *pool)
 {
 	if (map->count > 1.5f * MAX_VISIBLE_CHUNKS) {
-		rendermap_keep_only_in_range(map);
+		rendermap_keep_only_in_range(map, pool);
 	}
 	if (map->count > .75f * map->table_size) {
-		rendermap_keep_only_in_range(map);
+		rendermap_keep_only_in_range(map, pool);
 	}
 }
 
 void world_update(World *world)
 {
-	rendermap_clean_maybe(&world->render_map);
+	rendermap_clean_maybe(&world->render_map, &world->ogl_pool);
 	// size_t num = pool_find_unloadable(&world->pool, &world->unloaded);
 	// VINFO("Num unloaded: %zu", num);
 	// VINFO("==========================================");

@@ -1,6 +1,7 @@
 #include "map.h"
 #include "chunk.h"
 #include "logs.h"
+#include "oglpool.h"
 #include "vassert.h"
 #include <stddef.h>
 #include <stdint.h>
@@ -58,7 +59,7 @@ bool rendermap_get_chunk(RenderMap *map, Chunk *chunk, ChunkCoord *key)
 	return false;
 }
 
-static bool rendermap_add_opt(RenderMap *map, Chunk *chunk, size_t buffer, uint32_t *index)
+static bool rendermap_add_opt(RenderMap *map, OGLPool *pool, Chunk *chunk, size_t buffer, uint32_t *index)
 {
 	uint32_t idx;
 	if (index == NULL)
@@ -73,6 +74,8 @@ static bool rendermap_add_opt(RenderMap *map, Chunk *chunk, size_t buffer, uint3
 		if (entry->flags & HashMapFlagDeleted) {
 			memset(entry, 0, sizeof(*entry));
 			entry->chunk = *chunk;
+			if (chunk->has_oglpool_reference)
+				oglpool_reference(pool, chunk->oglpool_index);
 			entry->flags |= HashMapFlagOccupied;
 			entry->flags &= ~HashMapFlagDeleted;
 			entry->off_by = off_count;
@@ -85,15 +88,19 @@ static bool rendermap_add_opt(RenderMap *map, Chunk *chunk, size_t buffer, uint3
 				if (chunkcoord_match(&entry->chunk.coord, &chunk->coord)) {
 					// TODO: maybe reuse it instead
 
-					// VASSERT(entry->chunk.VBO != chunk->VBO);
-					if (entry->chunk.VBO != chunk->VBO)
-						chunk_free(&entry->chunk);
+					// VASSERT(entry->chunk.oglpool_index == chunk->oglpool_index);
+					if (entry->chunk.oglpool_index != chunk->oglpool_index) {
+						VWARN("Replacing map's reference instead of reusing");
+						oglpool_release(pool, entry->chunk.oglpool_index);
+					}
 					entry->chunk = *chunk;
 
 					return true;
 				}
 			} else {
 				entry->chunk = *chunk;
+				if (chunk->has_oglpool_reference)
+					oglpool_reference(pool, chunk->oglpool_index);
 				entry->flags |= HashMapFlagOccupied;
 				entry->off_by = off_count;
 				map->count++;
@@ -112,9 +119,9 @@ static bool rendermap_add_opt(RenderMap *map, Chunk *chunk, size_t buffer, uint3
 	VERROR("Hashmap full failed cycle");
 	return false;
 }
-bool rendermap_add(RenderMap *map, Chunk *chunk)
+bool rendermap_add(RenderMap *map, OGLPool *pool, Chunk *chunk)
 {
-	return rendermap_add_opt(map, chunk, map->current_buffer, NULL);
+	return rendermap_add_opt(map, pool, chunk, map->current_buffer, NULL);
 }
 
 bool rendermap_find(const RenderMap *map, const ChunkCoord *key, size_t *index)
@@ -165,27 +172,27 @@ size_t rendermap_next_buffer(const RenderMap *map)
 {
 	return (map->current_buffer + 1) % map->num_buffers;
 }
-bool rendermap_add_next_buffer(RenderMap *map, Chunk *chunk)
+bool rendermap_add_next_buffer(RenderMap *map, OGLPool *pool, Chunk *chunk)
 {
 	size_t start_count = map->count;
 	size_t next_buffer = rendermap_next_buffer(map);
 	map->count_next += map->count - start_count;
 
 	uint32_t index;
-	bool ret = rendermap_add_opt(map, chunk, next_buffer, &index);
+	bool ret = rendermap_add_opt(map, pool, chunk, next_buffer, &index);
 	if (ret)
 		map->entry[next_buffer][index].flags |= HashMapFlagStaysNext;
 	return ret;
 }
 
-void rendermap_advance_buffer(RenderMap *map)
+void rendermap_advance_buffer(RenderMap *map, OGLPool *pool)
 {
 	RenderMap tmp = *map;
 
 	for (size_t i = 0; i < map->table_size; i++) {
 		RenderMapEntry *entry = &map->entry[map->current_buffer][i];
-		if (entry->chunk.VAO != 0 && !(entry->flags & HashMapFlagStaysNext)) {
-			// chunk_free(&entry->chunk);
+		if (entry->chunk.has_oglpool_reference != 0 && !(entry->flags & HashMapFlagStaysNext)) {
+			oglpool_release(pool, entry->chunk.oglpool_index);
 		}
 	}
 
@@ -199,7 +206,7 @@ void rendermap_advance_buffer(RenderMap *map)
 	map->current_buffer = rendermap_next_buffer(map);
 }
 
-bool rendermap_remove(RenderMap *map, ChunkCoord *key)
+bool rendermap_remove(RenderMap *map, OGLPool *pool, ChunkCoord *key)
 {
 	size_t index;
 	index = triple_hash(map, key);
@@ -224,7 +231,8 @@ bool rendermap_remove(RenderMap *map, ChunkCoord *key)
 					map->entry[map->current_buffer][last_carry].flags &= ~HashMapFlagCarry;
 				}
 				entry->flags |= HashMapFlagDeleted;
-				chunk_free(&entry->chunk);
+				if (entry->chunk.has_oglpool_reference)
+					oglpool_release(pool, entry->chunk.oglpool_index);
 				return true;
 			}
 			if (entry->flags & HashMapFlagCarry) {
