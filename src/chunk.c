@@ -63,7 +63,7 @@ void print_chunk(Chunk *chunk)
 	VINFO("up_to_date: %s", chunk->up_to_date ? "true" : "false");
 	VINFO("terrain_generated: %s", chunk->terrain_generated ? "true" : "false");
 	VINFO("contains_blocks: %s", chunk->contains_blocks ? "true" : "false");
-	VINFO("vertex_count: %i", chunk->vertex_count);
+	VINFO("face_count: %i", chunk->face_count);
 	VINFO("cycles_since_update: %i", chunk->cycles_since_update);
 	VINFO("has_oglpool_reference: %s", chunk->has_oglpool_reference ? "true" : "false");
 	// if (chunk->has_oglpool_reference)
@@ -90,7 +90,7 @@ void chunk_generate_terrain(Chunk *chunk, size_t seed)
 						chunk->contains_blocks = true;
 						block->type = BlocktypeGrass;
 						block->obstructing = true;
-						// block_make_light(block, (Color){ 255, 255, 255, 0 }, 15);
+						// block_make_light(block, (Color){ 255, 255, 255, 0 }, 15); // TODO:make proper light propagation and remove
 					}
 				}
 			}

@@ -1,3 +1,4 @@
+#include "block.h"
 #include "disk.h"
 #include <GL/glcorearb.h>
 #include <stdbool.h>
@@ -18,8 +19,8 @@
 #include "pool.h"
 #include "oglpool.h"
 
-#include "verts/vert2.c"
-#include "frags/frag2.c"
+#include "shaders/vert2.c"
+#include "shaders/frag2.c"
 
 const char *BlockTypeString[] = {
 #define X(name) #name,
@@ -50,10 +51,6 @@ void print_blocklight(BlockLight light)
 	VINFO("range: %u", light >> 8 * 0 & 0xFF);
 }
 
-#define RENDER_DISTANCE_X 4
-#define RENDER_DISTANCE_Y 4
-#define RENDER_DISTANCE_Z 4
-#define MAX_VISIBLE_CHUNKS (2 * RENDER_DISTANCE_X + 1) * (2 * RENDER_DISTANCE_Y + 1) * (2 * RENDER_DISTANCE_Z + 1)
 
 /* #define FOR_CHUNKS_IN_RENDERDISTANCE(...)                                             \
 // 	for (int z = -RENDER_DISTANCE_Z; z <= RENDER_DISTANCE_Z; z++)                 \
@@ -100,6 +97,100 @@ typedef enum {
 	FACE_TOP
 } CubeFace;
 
+typedef struct {
+	vec3 positions[VERTICES_PER_QUAD];
+	vec2 tex_coords[VERTICES_PER_QUAD];
+	uint8_t face_id;
+} CubeFaceDef;
+
+const CubeFaceDef cube_faces[FACES_PER_CUBE] = {
+	// BACK (z = -0.5)
+	{
+		.positions = {
+			{ 0.5f, 0.5f, -0.5f }, // Vertex 0 (index 0,5)
+			{ 0.5f, -0.5f, -0.5f }, // Vertex 1 (index 1)
+			{ -0.5f, -0.5f, -0.5f }, // Vertex 2 (index 2,3)
+			{ -0.5f, 0.5f, -0.5f } // Vertex 4 (index 4)
+		},
+		.tex_coords = {
+			{ 0.0f, 0.0f }, // From vertices 0,5
+			{ 0.0f, 1.0f }, // From vertex 1
+			{ 1.0f, 1.0f }, // From vertices 2,3
+			{ 1.0f, 0.0f } // From vertex 4
+		},
+		.face_id = FACE_BACK },
+	// FRONT face
+	{ .positions = {
+		  { -0.5f, -0.5f, 0.5f }, // Vertex 0
+		  { 0.5f, -0.5f, 0.5f }, // Vertex 1
+		  { 0.5f, 0.5f, 0.5f }, // Vertex 2,3
+		  { -0.5f, 0.5f, 0.5f } // Vertex 4
+	  },
+	  .tex_coords = {
+		  { 0.0f, 1.0f }, // From vertex 0
+		  { 1.0f, 1.0f }, // From vertex 1
+		  { 1.0f, 0.0f }, // From vertices 2,3
+		  { 0.0f, 0.0f } // From vertex 4
+	  },
+	  .face_id = FACE_FRONT },
+	// LEFT face
+	{ .positions = {
+		  { -0.5f, 0.5f, 0.5f }, // Vertex 0,5
+		  { -0.5f, 0.5f, -0.5f }, // Vertex 1
+		  { -0.5f, -0.5f, -0.5f }, // Vertex 2,3
+		  { -0.5f, -0.5f, 0.5f } // Vertex 4
+	  },
+	  .tex_coords = {
+		  { 1.0f, 0.0f }, // From vertices 0,5
+		  { 0.0f, 0.0f }, // From vertex 1
+		  { 0.0f, 1.0f }, // From vertices 2,3
+		  { 1.0f, 1.0f } // From vertex 4
+	  },
+	  .face_id = FACE_LEFT },
+	// RIGHT face
+	{ .positions = {
+		  { 0.5f, -0.5f, -0.5f }, // Vertex 0,5
+		  { 0.5f, 0.5f, -0.5f }, // Vertex 1
+		  { 0.5f, 0.5f, 0.5f }, // Vertex 2,3
+		  { 0.5f, -0.5f, 0.5f } // Vertex 4
+	  },
+	  .tex_coords = {
+		  { 1.0f, 1.0f }, // From vertices 0,5
+		  { 1.0f, 0.0f }, // From vertex 1
+		  { 0.0f, 0.0f }, // From vertices 2,3
+		  { 0.0f, 1.0f } // From vertex 4
+	  },
+	  .face_id = FACE_RIGHT },
+	// BOTTOM face
+	{ .positions = {
+		  { -0.5f, -0.5f, -0.5f }, // Vertex 0,5
+		  { 0.5f, -0.5f, -0.5f }, // Vertex 1
+		  { 0.5f, -0.5f, 0.5f }, // Vertex 2,3
+		  { -0.5f, -0.5f, 0.5f } // Vertex 4
+	  },
+	  .tex_coords = {
+		  { 1.0f, 0.0f }, // From vertices 0,5
+		  { 0.0f, 0.0f }, // From vertex 1
+		  { 0.0f, 1.0f }, // From vertices 2,3
+		  { 1.0f, 1.0f } // From vertex 4
+	  },
+	  .face_id = FACE_BOTTOM },
+	// TOP face
+	{ .positions = {
+		  { 0.5f, 0.5f, 0.5f }, // Vertex 0,5
+		  { 0.5f, 0.5f, -0.5f }, // Vertex 1
+		  { -0.5f, 0.5f, -0.5f }, // Vertex 2,3
+		  { -0.5f, 0.5f, 0.5f } // Vertex 4
+	  },
+	  .tex_coords = {
+		  { 1.0f, 1.0f }, // From vertices 0,5
+		  { 1.0f, 0.0f }, // From vertex 1
+		  { 0.0f, 0.0f }, // From vertices 2,3
+		  { 0.0f, 1.0f } // From vertex 4
+	  },
+	  .face_id = FACE_TOP }
+};
+
 // static const vec3 face_normals[6] = {
 // 	{ 0, 0, -1 }, // BACK
 // 	{ 0, 0, 1 }, // FRONT
@@ -110,7 +201,7 @@ typedef enum {
 // };
 
 typedef struct {
-	Vertex vertices[VERTICES_PER_FACE];
+	Vertex vertices[VERTICES_PER_QUAD];
 } FaceVertices;
 
 float movement_speed = 5.0f;
@@ -353,7 +444,7 @@ void chunk_render(OGLPool *pool, Chunk *chunk, ShaderData shader_data)
 {
 	if (!chunk->up_to_date || !chunk->has_oglpool_reference)
 		return;
-	if (chunk->vertex_count == 0) {
+	if (chunk->face_count == 0) {
 		// VERROR("This guy again:");
 		return;
 	}
@@ -361,7 +452,7 @@ void chunk_render(OGLPool *pool, Chunk *chunk, ShaderData shader_data)
 
 	VASSERT_MSG(chunk->contains_blocks, "How did it get here?");
 	VASSERT_MSG(pool->items[chunk->oglpool_index].references > 0, "How did it get here?");
-	VASSERT_MSG(chunk->vertex_count > 0, "How did it get here?");
+	VASSERT_MSG(chunk->face_count > 0, "How did it get here?");
 
 	chunk->unchanged_render_count++;
 
@@ -378,7 +469,10 @@ void chunk_render(OGLPool *pool, Chunk *chunk, ShaderData shader_data)
 
 	GL_CHECK(glUniformMatrix4fv(shader_data.model_loc, 1, GL_FALSE, (const float *)model));
 
-	GL_CHECK(glDrawArrays(GL_TRIANGLES, 0, chunk->vertex_count));
+	size_t index_count = chunk->face_count * INDICES_PER_QUAD;
+
+	GL_CHECK(glDrawElements(GL_TRIANGLES, index_count, GL_UNSIGNED_SHORT, 0));
+	// GL_CHECK(glDrawArrays(GL_TRIANGLES, 0, chunk->vertex_count));
 	// GL_CHECK(print_chunk(chunk));
 }
 
@@ -427,52 +521,60 @@ void texture_get_uv_vertex(float local_u, float local_v, BLOCKTYPE type, CubeFac
 	get_tile_uv(coords.tileX, coords.tileY, local_u, local_v, u, v);
 }
 
-const FaceVertices cube_vertices[] = {
-	// BACK (normal: 0, 0, -1)
+// const FaceVertices cube_vertices[] = {
+// 	// BACK (normal: 0, 0, -1)
+//
+// 	{
+// 		.vertices = {
+// 			{ { 0.5f, 0.5f, -0.5f }, { 0.0f, 0.0f }, FACE_BACK, 0 },
+// 			{ { 0.5f, -0.5f, -0.5f }, { 0.0f, 1.0f }, FACE_BACK, 0 },
+// 			{ { -0.5f, -0.5f, -0.5f }, { 1.0f, 1.0f }, FACE_BACK, 0 },
+// 			{ { -0.5f, -0.5f, -0.5f }, { 1.0f, 1.0f }, FACE_BACK, 0 },
+// 			{ { -0.5f, 0.5f, -0.5f }, { 1.0f, 0.0f }, FACE_BACK, 0 },
+// 			{ { 0.5f, 0.5f, -0.5f }, { 0.0f, 0.0f }, FACE_BACK, 0 } } },
+// 	// FRONT (normal: 0, 0, 1)
+// 	{ .vertices = { { { -0.5f, -0.5f, 0.5f }, { 0.0f, 1.0f }, FACE_FRONT, 0 }, { { 0.5f, -0.5f, 0.5f }, { 1.0f, 1.0f }, FACE_FRONT, 0 }, { { 0.5f, 0.5f, 0.5f }, { 1.0f, 0.0f }, FACE_FRONT, 0 }, { { 0.5f, 0.5f, 0.5f }, { 1.0f, 0.0f }, FACE_FRONT, 0 }, { { -0.5f, 0.5f, 0.5f }, { 0.0f, 0.0f }, FACE_FRONT, 0 }, { { -0.5f, -0.5f, 0.5f }, { 0.0f, 1.0f }, FACE_FRONT, 0 } } },
+// 	// LEFT (normal: -1, 0, 0)
+// 	{ .vertices = { { { -0.5f, 0.5f, 0.5f }, { 1.0f, 0.0f }, FACE_LEFT, 0 }, { { -0.5f, 0.5f, -0.5f }, { 0.0f, 0.0f }, FACE_LEFT, 0 }, { { -0.5f, -0.5f, -0.5f }, { 0.0f, 1.0f }, FACE_LEFT, 0 }, { { -0.5f, -0.5f, -0.5f }, { 0.0f, 1.0f }, FACE_LEFT, 0 }, { { -0.5f, -0.5f, 0.5f }, { 1.0f, 1.0f }, FACE_LEFT, 0 }, { { -0.5f, 0.5f, 0.5f }, { 1.0f, 0.0f }, FACE_LEFT, 0 } } },
+// 	// RIGHT (normal: 1, 0, 0)
+// 	{ .vertices = { { { 0.5f, -0.5f, -0.5f }, { 1.0f, 1.0f }, FACE_RIGHT, 0 }, { { 0.5f, 0.5f, -0.5f }, { 1.0f, 0.0f }, FACE_RIGHT, 0 }, { { 0.5f, 0.5f, 0.5f }, { 0.0f, 0.0f }, FACE_RIGHT, 0 }, { { 0.5f, 0.5f, 0.5f }, { 0.0f, 0.0f }, FACE_RIGHT, 0 }, { { 0.5f, -0.5f, 0.5f }, { 0.0f, 1.0f }, FACE_RIGHT, 0 }, { { 0.5f, -0.5f, -0.5f }, { 1.0f, 1.0f }, FACE_RIGHT, 0 } } },
+// 	// BOTTOM (normal: 0, -1, 0)
+// 	{ .vertices = { { { -0.5f, -0.5f, -0.5f }, { 1.0f, 0.0f }, FACE_BOTTOM, 0 }, { { 0.5f, -0.5f, -0.5f }, { 0.0f, 0.0f }, FACE_BOTTOM, 0 }, { { 0.5f, -0.5f, 0.5f }, { 0.0f, 1.0f }, FACE_BOTTOM, 0 }, { { 0.5f, -0.5f, 0.5f }, { 0.0f, 1.0f }, FACE_BOTTOM, 0 }, { { -0.5f, -0.5f, 0.5f }, { 1.0f, 1.0f }, FACE_BOTTOM, 0 }, { { -0.5f, -0.5f, -0.5f }, { 1.0f, 0.0f }, FACE_BOTTOM, 0 } } },
+// 	// TOP (normal: 0, 1, 0)
+// 	{ .vertices = { { { 0.5f, 0.5f, 0.5f }, { 1.0f, 1.0f }, FACE_TOP, 0 }, { { 0.5f, 0.5f, -0.5f }, { 1.0f, 0.0f }, FACE_TOP, 0 }, { { -0.5f, 0.5f, -0.5f }, { 0.0f, 0.0f }, FACE_TOP, 0 }, { { -0.5f, 0.5f, -0.5f }, { 0.0f, 0.0f }, FACE_TOP, 0 }, { { -0.5f, 0.5f, 0.5f }, { 0.0f, 1.0f }, FACE_TOP, 0 }, { { 0.5f, 0.5f, 0.5f }, { 1.0f, 1.0f }, FACE_TOP, 0 } } }
+// };
 
-	{
-		.vertices = {
-			{ { 0.5f, 0.5f, -0.5f }, { 0.0f, 0.0f }, FACE_BACK },
-			{ { 0.5f, -0.5f, -0.5f }, { 0.0f, 1.0f }, FACE_BACK },
-			{ { -0.5f, -0.5f, -0.5f }, { 1.0f, 1.0f }, FACE_BACK },
-			{ { -0.5f, -0.5f, -0.5f }, { 1.0f, 1.0f }, FACE_BACK },
-			{ { -0.5f, 0.5f, -0.5f }, { 1.0f, 0.0f }, FACE_BACK },
-			{ { 0.5f, 0.5f, -0.5f }, { 0.0f, 0.0f }, FACE_BACK } } },
-	// FRONT (normal: 0, 0, 1)
-	{ .vertices = { { { -0.5f, -0.5f, 0.5f }, { 0.0f, 1.0f }, FACE_FRONT }, { { 0.5f, -0.5f, 0.5f }, { 1.0f, 1.0f }, FACE_FRONT }, { { 0.5f, 0.5f, 0.5f }, { 1.0f, 0.0f }, FACE_FRONT }, { { 0.5f, 0.5f, 0.5f }, { 1.0f, 0.0f }, FACE_FRONT }, { { -0.5f, 0.5f, 0.5f }, { 0.0f, 0.0f }, FACE_FRONT }, { { -0.5f, -0.5f, 0.5f }, { 0.0f, 1.0f }, FACE_FRONT } } },
-	// LEFT (normal: -1, 0, 0)
-	{ .vertices = { { { -0.5f, 0.5f, 0.5f }, { 1.0f, 0.0f }, FACE_LEFT }, { { -0.5f, 0.5f, -0.5f }, { 0.0f, 0.0f }, FACE_LEFT }, { { -0.5f, -0.5f, -0.5f }, { 0.0f, 1.0f }, FACE_LEFT }, { { -0.5f, -0.5f, -0.5f }, { 0.0f, 1.0f }, FACE_LEFT }, { { -0.5f, -0.5f, 0.5f }, { 1.0f, 1.0f }, FACE_LEFT }, { { -0.5f, 0.5f, 0.5f }, { 1.0f, 0.0f }, FACE_LEFT } } },
-	// RIGHT (normal: 1, 0, 0)
-	{ .vertices = { { { 0.5f, -0.5f, -0.5f }, { 1.0f, 1.0f }, FACE_RIGHT }, { { 0.5f, 0.5f, -0.5f }, { 1.0f, 0.0f }, FACE_RIGHT }, { { 0.5f, 0.5f, 0.5f }, { 0.0f, 0.0f }, FACE_RIGHT }, { { 0.5f, 0.5f, 0.5f }, { 0.0f, 0.0f }, FACE_RIGHT }, { { 0.5f, -0.5f, 0.5f }, { 0.0f, 1.0f }, FACE_RIGHT }, { { 0.5f, -0.5f, -0.5f }, { 1.0f, 1.0f }, FACE_RIGHT } } },
-	// BOTTOM (normal: 0, -1, 0)
-	{ .vertices = { { { -0.5f, -0.5f, -0.5f }, { 1.0f, 0.0f }, FACE_BOTTOM }, { { 0.5f, -0.5f, -0.5f }, { 0.0f, 0.0f }, FACE_BOTTOM }, { { 0.5f, -0.5f, 0.5f }, { 0.0f, 1.0f }, FACE_BOTTOM }, { { 0.5f, -0.5f, 0.5f }, { 0.0f, 1.0f }, FACE_BOTTOM }, { { -0.5f, -0.5f, 0.5f }, { 1.0f, 1.0f }, FACE_BOTTOM }, { { -0.5f, -0.5f, -0.5f }, { 1.0f, 0.0f }, FACE_BOTTOM } } },
-	// TOP (normal: 0, 1, 0)
-	{ .vertices = { { { 0.5f, 0.5f, 0.5f }, { 1.0f, 1.0f }, FACE_TOP }, { { 0.5f, 0.5f, -0.5f }, { 1.0f, 0.0f }, FACE_TOP }, { { -0.5f, 0.5f, -0.5f }, { 0.0f, 0.0f }, FACE_TOP }, { { -0.5f, 0.5f, -0.5f }, { 0.0f, 0.0f }, FACE_TOP }, { { -0.5f, 0.5f, 0.5f }, { 0.0f, 1.0f }, FACE_TOP }, { { 0.5f, 0.5f, 0.5f }, { 1.0f, 1.0f }, FACE_TOP } } }
-};
+static inline void const_vec3_copy(const vec3 a, vec3 dest)
+{
+	dest[0] = a[0];
+	dest[1] = a[1];
+	dest[2] = a[2];
+}
 
 void add_face_to_buffer(ChunkVertsScratch *buffer, int x, int y, int z, BLOCKTYPE type, CubeFace face, BlockLight light)
 {
-	FaceVertices face_verts = cube_vertices[face];
+	// FaceVertices face_verts = cube_vertices[face];
+	const CubeFaceDef *face_def = &cube_faces[face];
 
 	VASSERT_MSG(buffer->lvl + sizeof(FaceVertices) / sizeof(Vertex) <= buffer->cap, "Vertex buffer overflow!");
-	for (size_t i = 0; i < VERTICES_PER_FACE; i++) {
-		Vertex *vertex_data = &face_verts.vertices[i];
+	for (size_t i = 0; i < VERTICES_PER_QUAD; i++) {
+		Vertex vertex = { 0 };
 
-		vertex_data->pos[0] += 0.5f + (float)x;
-		vertex_data->pos[1] += 0.5f + (float)y;
-		vertex_data->pos[2] += 0.5f + (float)z;
+		const_vec3_copy(face_def->positions[i], vertex.pos);
+		// vertex.pos[0] +=  (float)x;
+		// vertex.pos[1] +=  (float)y;
+		// vertex.pos[2] +=  (float)z;
+		vertex.pos[0] += 0.5f + (float)x;
+		vertex.pos[1] += 0.5f + (float)y;
+		vertex.pos[2] += 0.5f + (float)z;
 
-		float local_u = vertex_data->tex[0];
-		float local_v = vertex_data->tex[1];
+		texture_get_uv_vertex(face_def->tex_coords[i][0],
+				      face_def->tex_coords[i][1],
+				      type, face, &vertex.tex[0], &vertex.tex[1]);
 
-		float u, v;
-		texture_get_uv_vertex(local_u, local_v, type, face, &u, &v);
-		vertex_data->tex[0] = u;
-		vertex_data->tex[1] = v;
-
-		vertex_data->norm |= face & 0xFF;
-		vertex_data->light = light;
-		buffer->data[buffer->lvl++] = *vertex_data;
+		vertex.norm |= face & 0x07;
+		vertex.light = light;
+		buffer->data[buffer->lvl++] = vertex;
 	}
 }
 
@@ -530,9 +632,9 @@ void chunk_generate_mesh(OGLPool *pool, Chunk *chunk, ChunkVertsScratch *tmp_chu
 			}
 		}
 	}
-	chunk->vertex_count = tmp_chunk_verts->lvl;
+	chunk->face_count = tmp_chunk_verts->lvl / VERTICES_PER_QUAD;
 
-	if (chunk->vertex_count == 0) {
+	if (chunk->face_count == 0) {
 		VERROR("This guy:");
 		print_chunk(chunk);
 		print_block(&chunk->data[0]);
@@ -546,11 +648,13 @@ void chunk_generate_mesh(OGLPool *pool, Chunk *chunk, ChunkVertsScratch *tmp_chu
 	VASSERT_MSG(item->references > 0, "How did it get here?");
 
 	glBindVertexArray(item->VAO);
+
 	glBindBuffer(GL_ARRAY_BUFFER, item->VBO);
 	glBufferData(GL_ARRAY_BUFFER,
 		     tmp_chunk_verts->lvl * sizeof(tmp_chunk_verts->data[0]),
 		     tmp_chunk_verts->data,
 		     chunk->updates_this_cycle > 2 ? GL_DYNAMIC_DRAW : GL_STATIC_DRAW);
+	// GL_CHECK(glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, pool->fullblock_EBO));
 	chunk->has_vbo_data = true;
 
 	chunk->up_to_date = true;
@@ -755,7 +859,7 @@ void render(GameState *game_state, WindowData window, ShaderData shader_data, Ch
 
 	glfwSwapBuffers(window.glfw);
 	glfwPollEvents();
-	GL_CHECK((void)0); // TODO:reenable
+	GL_CHECK((void)0);
 }
 
 typedef struct {
@@ -785,7 +889,7 @@ void player_place_block(ChunkPool *pool, OGLPool *ogl, RenderMap *map, const Wor
 	memset(block, 0, sizeof(*block));
 	block->obstructing = true;
 	block->type = BlocktypeStone;
-	block_make_light(block, (Color){ rand() % 255, rand() % 255, rand() % 255, 1 }, 31);
+	block_make_light(block, (Color){ rand() % 255, rand() % 255, rand() % 255, 1 }, 15);
 }
 
 /*
@@ -965,7 +1069,7 @@ int main()
 	glfwSetWindowFocusCallback(window.glfw, window_focus_callback);
 	// glfwSetMouseButtonCallback(window.glfw, mouse_button_callback);
 
-	static Vertex tmp_chunk_verts_data[CHUNK_TOTAL_VERTICES];
+	static Vertex tmp_chunk_verts_data[MAX_VERTICES_PER_CHUNK];
 	ChunkVertsScratch tmp_chunk_verts = { .data = tmp_chunk_verts_data, .lvl = 0, .cap = ARRAY_LEN(tmp_chunk_verts_data) };
 
 	{
@@ -974,8 +1078,8 @@ int main()
 		shader_data.model_loc = glGetUniformLocation(shader_data.program, "model");
 	}
 
-	BlockLight light = color_and_range_to_blocklight((Color){ 255, 255, 0, 1 }, 15);
-	print_blocklight(light);
+	// BlockLight light = color_and_range_to_blocklight((Color){ 255, 255, 0, 1 }, 15);
+	// print_blocklight(light);
 
 	Player *player = &world->player;
 	while (!glfwWindowShouldClose(window.glfw)) {

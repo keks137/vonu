@@ -40,7 +40,7 @@ void main()
 
 	vec3 finalLight = LightColor * totalLight;
 
-	finalLight = max(finalLight, vec3(0.1, 0.1, 0.1));
+	finalLight = max(finalLight, vec3(0.2, 0.2, 0.2));
 	FragColor = vec4(tex.rgb * finalLight, tex.a);
 	// vec3 lightPos = vec3(0.0, 10.0, 0.0);
 	// vec3 lightColor = vec3(1.0, 1.0, 0.0);

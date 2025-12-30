@@ -5,3 +5,7 @@ bin
 compile_commands.json
 nob
 nob.old
+flamegraph.svg
+perf.data
+perf.data.old
+

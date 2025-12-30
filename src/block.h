@@ -26,7 +26,7 @@ typedef enum {
 
 extern const char *BlockTypeString[];
 
-typedef uint32_t BlockLight; // rgb and range as 1 byte each
+typedef uint32_t BlockLight; // rgb 1 byte each, range only 4 bits
 typedef struct {
 	BLOCKTYPE type;
 	bool obstructing;

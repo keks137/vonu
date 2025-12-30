@@ -17,7 +17,6 @@
 #define CHUNK_STRIDE_Z CHUNK_TOTAL_X *CHUNK_TOTAL_Y
 
 #define CHUNK_INDEX(x, y, z) ((x) + (y) * CHUNK_STRIDE_Y + (z) * CHUNK_STRIDE_Z)
-#define CHUNK_TOTAL_VERTICES (CHUNK_TOTAL_BLOCKS * FACES_PER_CUBE * VERTICES_PER_FACE)
 typedef struct {
 	int64_t x;
 	int64_t y;
@@ -61,7 +60,8 @@ typedef struct {
 	// unsigned int VBO;
 	size_t oglpool_index;
 	bool has_oglpool_reference;
-	size_t vertex_count;
+	// size_t vertex_count;
+	size_t face_count;
 	bool contains_blocks;
 	bool up_to_date;
 	bool terrain_generated;

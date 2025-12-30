@@ -38,7 +38,7 @@ void main()
 	uint g = (aLight >> 16) & 0xFFu;
 	uint b = (aLight >> 24) & 0xFFu;
 
-	LightLevel = (aLight & 0x1Fu) / 31.0;
+	LightLevel = (aLight & 0xFu) / 15.0;
 
 	LightColor = vec3(float(r) / 255.0, float(g) / 255.0, float(b) / 255.0);
 }
