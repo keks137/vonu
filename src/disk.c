@@ -142,7 +142,11 @@ bool disk_save(Chunk *chunk, const char *world_uid)
 		return false;
 	}
 
-	size_t blocks_written = fwrite(chunk->data, sizeof(Block), CHUNK_TOTAL_BLOCKS, file);
+	size_t blocks_written = 0;
+	for (size_t i = 0; i < CHUNK_TOTAL_BLOCKS; i++) {
+		BLOCKTYPE data = chunk->data[i].type;
+		blocks_written += fwrite(&data, sizeof(data), 1, file);
+	}
 
 	if (ferror(file)) {
 		VERROR("Write error for %s: %s", filename, strerror(errno));
@@ -215,7 +219,17 @@ bool disk_load(Chunk *chunk, const char *world_uid)
 		      CHUNK_TOTAL_X, CHUNK_TOTAL_Y, CHUNK_TOTAL_Z);
 	}
 
-	size_t blocks_read = fread(chunk->data, sizeof(Block), CHUNK_TOTAL_BLOCKS, file);
+	// TODO: not one at a time
+	size_t blocks_read = 0;
+	for (size_t i = 0; i < CHUNK_TOTAL_BLOCKS; i++) {
+		BLOCKTYPE data = 0;
+		blocks_read += fread(&data, sizeof(data), 1, file);
+		chunk->data[i].type = data;
+		// TODO: proper handling of block type metadata
+		if (data == BlocktypeGrass || data == BlocktypeStone) {
+			chunk->data[i].obstructing = true;
+		}
+	}
 
 	if (ferror(file)) {
 		VERROR("Read error from %s: %s", filename, strerror(errno));

@@ -135,6 +135,15 @@ void print_pool(ChunkPool *pool)
 	}
 #endif
 }
+static inline Block *chunk_blockpos_at(const Chunk *chunk, const BlockPos *pos)
+{
+	VASSERT(pos->x < CHUNK_TOTAL_X &&
+		pos->y < CHUNK_TOTAL_Y &&
+		pos->z < CHUNK_TOTAL_Z);
+
+	return &chunk->data[CHUNK_INDEX(pos->x, pos->y, pos->z)];
+}
+
 void pool_update_block(ChunkPool *pool, OGLPool *ogl, RenderMap *map, const WorldCoord *pos, Block **block, size_t seed, bool now_contains_blocks)
 {
 	ChunkCoord chunk_pos = { 0 };

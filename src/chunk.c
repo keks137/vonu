@@ -1,4 +1,5 @@
 #include "chunk.h"
+#include "block.h"
 #include "logs.h"
 #include "vassert.h"
 #include <string.h>
@@ -34,15 +35,6 @@ Block *chunk_xyz_at(const Chunk *chunk, int x, int y, int z)
 	return &chunk->data[CHUNK_INDEX(x, y, z)];
 }
 
-
-Block *chunk_blockpos_at(const Chunk *chunk, const BlockPos *pos)
-{
-	VASSERT(pos->x < CHUNK_TOTAL_X &&
-		pos->y < CHUNK_TOTAL_Y &&
-		pos->z < CHUNK_TOTAL_Z);
-
-	return &chunk->data[CHUNK_INDEX(pos->x, pos->y, pos->z)];
-}
 ChunkCoord world_coord_to_chunk(const WorldCoord *world)
 {
 	ChunkCoord chunk;
@@ -80,7 +72,7 @@ void print_chunk(Chunk *chunk)
 void clear_chunk_verts_scratch(ChunkVertsScratch *tmp_chunk_verts)
 {
 	// memset(tmp_chunk_verts->data, 0, sizeof(float) * tmp_chunk_verts->fill);
-	tmp_chunk_verts->fill = 0;
+	tmp_chunk_verts->lvl = 0;
 }
 void chunk_generate_terrain(Chunk *chunk, size_t seed)
 {
@@ -94,9 +86,11 @@ void chunk_generate_terrain(Chunk *chunk, size_t seed)
 				size_t y_lim = 1 + rand() % 20;
 				for (size_t x = 0; x < CHUNK_TOTAL_X; x++) {
 					if (y < y_lim) {
+						Block *block = &chunk->data[CHUNK_INDEX(x, y, z)];
 						chunk->contains_blocks = true;
-						chunk->data[CHUNK_INDEX(x, y, z)].type = BlocktypeGrass;
-						chunk->data[CHUNK_INDEX(x, y, z)].obstructing = true;
+						block->type = BlocktypeGrass;
+						block->obstructing = true;
+						// block_make_light(block, (Color){ 255, 255, 255, 0 }, 15);
 					}
 				}
 			}

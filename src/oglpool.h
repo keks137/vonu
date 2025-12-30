@@ -1,6 +1,9 @@
 #ifndef INCLUDE_SRC_OGLPOOL_H_
 #define INCLUDE_SRC_OGLPOOL_H_
 
+#define VERTICES_PER_FACE 6
+#define FACES_PER_CUBE 6
+
 #include <stdbool.h>
 #include <stddef.h>
 typedef struct {

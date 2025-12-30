@@ -5,15 +5,29 @@
 #include "vassert.h"
 #include <stddef.h>
 #include <string.h>
-static void vao_attributes_no_color(unsigned int VAO)
+
+static void vao_attributes(unsigned int VAO)
 {
 	glBindVertexArray(VAO);
 
-	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void *)0);
+	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE,
+			      sizeof(Vertex),
+			      (void *)offsetof(Vertex, pos));
 	glEnableVertexAttribArray(0);
 
-	glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void *)(3 * sizeof(float)));
+	glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE,
+			      sizeof(Vertex),
+			      (void *)offsetof(Vertex, tex));
 	glEnableVertexAttribArray(1);
+
+	glVertexAttribIPointer(2, 1, GL_UNSIGNED_INT,
+			       sizeof(Vertex),
+			       (void *)offsetof(Vertex, norm));
+	glEnableVertexAttribArray(2);
+	glVertexAttribIPointer(3, 1, GL_UNSIGNED_INT,
+			       sizeof(Vertex),
+			       (void *)offsetof(Vertex, light));
+	glEnableVertexAttribArray(3);
 }
 
 static void oglitem_init(OGLItem *item)
@@ -23,7 +37,7 @@ static void oglitem_init(OGLItem *item)
 
 	glBindVertexArray(item->VAO);
 	glBindBuffer(GL_ARRAY_BUFFER, item->VBO);
-	vao_attributes_no_color(item->VAO);
+	vao_attributes(item->VAO);
 }
 void oglpool_init(OGLPool *pool, size_t cap)
 {

@@ -18,8 +18,8 @@
 #include "pool.h"
 #include "oglpool.h"
 
-#include "verts/vert1.c"
-#include "frags/frag1.c"
+#include "verts/vert2.c"
+#include "frags/frag2.c"
 
 const char *BlockTypeString[] = {
 #define X(name) #name,
@@ -41,6 +41,14 @@ typedef struct {
 	float pitch;
 	float fov;
 } Camera;
+
+void print_blocklight(BlockLight light)
+{
+	VINFO("r: %u", light >> 8 * 3 & 0xFF);
+	VINFO("g: %u", light >> 8 * 2 & 0xFF);
+	VINFO("b: %u", light >> 8 * 1 & 0xFF);
+	VINFO("range: %u", light >> 8 * 0 & 0xFF);
+}
 
 #define RENDER_DISTANCE_X 4
 #define RENDER_DISTANCE_Y 4
@@ -80,11 +88,8 @@ typedef struct {
 	float last_frame;
 	bool paused;
 } GameState;
-GameState game_state = { 0 };
 
-#define FLOATS_PER_VERTEX 5
-#define VERTICES_PER_FACE 6
-#define FACES_PER_CUBE 6
+GameState game_state = { 0 };
 
 typedef enum {
 	FACE_BACK = 0,
@@ -105,70 +110,15 @@ typedef enum {
 // };
 
 typedef struct {
-	float vertices[VERTICES_PER_FACE][FLOATS_PER_VERTEX];
+	Vertex vertices[VERTICES_PER_FACE];
 } FaceVertices;
 
 float movement_speed = 5.0f;
 
 #define ARRAY_LEN(array) (sizeof(array) / sizeof(array[0]))
 
-const char *vertexShaderSource = (char *)verts_vert1;
-const char *fragmentShaderSource = (char *)frags_frag1;
-
-FaceVertices cube_vertices[] = {
-	// BACK
-	{
-		{ { 0.5f, 0.5f, -0.5f, 0.0f, 0.0f },
-		  { 0.5f, -0.5f, -0.5f, 0.0f, 1.0f },
-		  { -0.5f, -0.5f, -0.5f, 1.0f, 1.0f },
-		  { -0.5f, -0.5f, -0.5f, 1.0f, 1.0f },
-		  { -0.5f, 0.5f, -0.5f, 1.0f, 0.0f },
-		  { 0.5f, 0.5f, -0.5f, 0.0f, 0.0f } } },
-	// FRONT
-	{
-		{ { -0.5f, -0.5f, 0.5f, 0.0f, 1.0f },
-		  { 0.5f, -0.5f, 0.5f, 1.0f, 1.0f },
-		  { 0.5f, 0.5f, 0.5f, 1.0f, 0.0f },
-		  { 0.5f, 0.5f, 0.5f, 1.0f, 0.0f },
-		  { -0.5f, 0.5f, 0.5f, 0.0f, 0.0f },
-		  { -0.5f, -0.5f, 0.5f, 0.0f, 1.0f } } },
-	// LEFT
-	{
-		{ { -0.5f, 0.5f, 0.5f, 1.0f, 0.0f },
-		  { -0.5f, 0.5f, -0.5f, 0.0f, 0.0f },
-		  { -0.5f, -0.5f, -0.5f, 0.0f, 1.0f },
-		  { -0.5f, -0.5f, -0.5f, 0.0f, 1.0f },
-		  { -0.5f, -0.5f, 0.5f, 1.0f, 1.0f },
-		  { -0.5f, 0.5f, 0.5f, 1.0f, 0.0f } } },
-	// RIGHT
-	{
-		{ { 0.5f, -0.5f, -0.5f, 1.0f, 1.0f },
-		  { 0.5f, 0.5f, -0.5f, 1.0f, 0.0f },
-		  { 0.5f, 0.5f, 0.5f, 0.0f, 0.0f },
-		  { 0.5f, 0.5f, 0.5f, 0.0f, 0.0f },
-		  { 0.5f, -0.5f, 0.5f, 0.0f, 1.0f },
-		  { 0.5f, -0.5f, -0.5f, 1.0f, 1.0f } } },
-	// BOTTOM
-	{
-		{ { -0.5f, -0.5f, -0.5f, 1.0f, 0.0f },
-		  { 0.5f, -0.5f, -0.5f, 0.0f, 0.0f },
-		  { 0.5f, -0.5f, 0.5f, 0.0f, 1.0f },
-		  { 0.5f, -0.5f, 0.5f, 0.0f, 1.0f },
-		  { -0.5f, -0.5f, 0.5f, 1.0f, 1.0f },
-		  { -0.5f, -0.5f, -0.5f, 1.0f, 0.0f } } },
-	// TOP
-	{
-		{ { 0.5f, 0.5f, 0.5f, 1.0f, 1.0f },
-		  { 0.5f, 0.5f, -0.5f, 1.0f, 0.0f },
-		  { -0.5f, 0.5f, -0.5f, 0.0f, 0.0f },
-		  { -0.5f, 0.5f, -0.5f, 0.0f, 0.0f },
-		  { -0.5f, 0.5f, 0.5f, 0.0f, 1.0f },
-		  { 0.5f, 0.5f, 0.5f, 1.0f, 1.0f } } }
-};
-unsigned int indices[] = {
-	0, 1, 3,
-	1, 2, 3
-};
+const char *vertexShaderSource = (char *)verts_vert2;
+const char *fragmentShaderSource = (char *)frags_frag2;
 
 float last_x = 400;
 float last_y = 300;
@@ -311,14 +261,14 @@ void process_input(GLFWwindow *window, Player *player)
 	}
 }
 
-bool verify_shader(unsigned int shader)
+bool verify_shader(unsigned int shader, bool frag)
 {
 	int success;
 	char infoLog[512];
 	glGetShaderiv(shader, GL_COMPILE_STATUS, &success);
 	if (!success) {
 		glGetShaderInfoLog(shader, 512, NULL, infoLog);
-		VERROR(infoLog);
+		VERROR("%s:%s", frag ? "frag" : "vert", infoLog);
 		return false;
 	}
 	return true;
@@ -341,13 +291,13 @@ bool create_shader_program(unsigned int *shader_program, const char *vertex_shad
 	unsigned int vertex_shader = glCreateShader(GL_VERTEX_SHADER);
 	glShaderSource(vertex_shader, 1, &vertex_shader_str, NULL);
 	glCompileShader(vertex_shader);
-	if (!verify_shader(vertex_shader))
+	if (!verify_shader(vertex_shader, false))
 		return false;
 
 	unsigned int fragment_shader = glCreateShader(GL_FRAGMENT_SHADER);
 	glShaderSource(fragment_shader, 1, &fragment_shader_str, NULL);
 	glCompileShader(fragment_shader);
-	if (!verify_shader(fragment_shader))
+	if (!verify_shader(fragment_shader, true))
 		return false;
 
 	*shader_program = glCreateProgram();
@@ -396,7 +346,6 @@ void print_image_info(Image *image)
 		GLenum err = glGetError();                                                                        \
 		if (err != GL_NO_ERROR) {                                                                         \
 			VERROR("OpenGL error 0x%04X at %s:%d: %s: %s", err, __FILE__, __LINE__, __func__, #stmt); \
-			print_chunk(chunk);                                                                       \
 		}                                                                                                 \
 	} while (0)
 
@@ -470,36 +419,60 @@ void texture_get_uv_vertex(float local_u, float local_v, BLOCKTYPE type, CubeFac
 			[FACE_LEFT] = { 1, 0 },
 			[FACE_RIGHT] = { 1, 0 },
 			[FACE_BOTTOM] = { 2, 0 },
-			[FACE_TOP] = { 0, 0 } }
+			[FACE_TOP] = { 0, 0 } },
+		[BlocktypeStone] = { [FACE_BACK] = { 3, 0 }, [FACE_FRONT] = { 3, 0 }, [FACE_LEFT] = { 3, 0 }, [FACE_RIGHT] = { 3, 0 }, [FACE_BOTTOM] = { 3, 0 }, [FACE_TOP] = { 3, 0 } },
 	};
 
 	TextureCoords coords = texture_map[type][face];
 	get_tile_uv(coords.tileX, coords.tileY, local_u, local_v, u, v);
 }
 
-void add_face_to_buffer(ChunkVertsScratch *buffer, int x, int y, int z, BLOCKTYPE type, CubeFace face)
+const FaceVertices cube_vertices[] = {
+	// BACK (normal: 0, 0, -1)
+
+	{
+		.vertices = {
+			{ { 0.5f, 0.5f, -0.5f }, { 0.0f, 0.0f }, FACE_BACK },
+			{ { 0.5f, -0.5f, -0.5f }, { 0.0f, 1.0f }, FACE_BACK },
+			{ { -0.5f, -0.5f, -0.5f }, { 1.0f, 1.0f }, FACE_BACK },
+			{ { -0.5f, -0.5f, -0.5f }, { 1.0f, 1.0f }, FACE_BACK },
+			{ { -0.5f, 0.5f, -0.5f }, { 1.0f, 0.0f }, FACE_BACK },
+			{ { 0.5f, 0.5f, -0.5f }, { 0.0f, 0.0f }, FACE_BACK } } },
+	// FRONT (normal: 0, 0, 1)
+	{ .vertices = { { { -0.5f, -0.5f, 0.5f }, { 0.0f, 1.0f }, FACE_FRONT }, { { 0.5f, -0.5f, 0.5f }, { 1.0f, 1.0f }, FACE_FRONT }, { { 0.5f, 0.5f, 0.5f }, { 1.0f, 0.0f }, FACE_FRONT }, { { 0.5f, 0.5f, 0.5f }, { 1.0f, 0.0f }, FACE_FRONT }, { { -0.5f, 0.5f, 0.5f }, { 0.0f, 0.0f }, FACE_FRONT }, { { -0.5f, -0.5f, 0.5f }, { 0.0f, 1.0f }, FACE_FRONT } } },
+	// LEFT (normal: -1, 0, 0)
+	{ .vertices = { { { -0.5f, 0.5f, 0.5f }, { 1.0f, 0.0f }, FACE_LEFT }, { { -0.5f, 0.5f, -0.5f }, { 0.0f, 0.0f }, FACE_LEFT }, { { -0.5f, -0.5f, -0.5f }, { 0.0f, 1.0f }, FACE_LEFT }, { { -0.5f, -0.5f, -0.5f }, { 0.0f, 1.0f }, FACE_LEFT }, { { -0.5f, -0.5f, 0.5f }, { 1.0f, 1.0f }, FACE_LEFT }, { { -0.5f, 0.5f, 0.5f }, { 1.0f, 0.0f }, FACE_LEFT } } },
+	// RIGHT (normal: 1, 0, 0)
+	{ .vertices = { { { 0.5f, -0.5f, -0.5f }, { 1.0f, 1.0f }, FACE_RIGHT }, { { 0.5f, 0.5f, -0.5f }, { 1.0f, 0.0f }, FACE_RIGHT }, { { 0.5f, 0.5f, 0.5f }, { 0.0f, 0.0f }, FACE_RIGHT }, { { 0.5f, 0.5f, 0.5f }, { 0.0f, 0.0f }, FACE_RIGHT }, { { 0.5f, -0.5f, 0.5f }, { 0.0f, 1.0f }, FACE_RIGHT }, { { 0.5f, -0.5f, -0.5f }, { 1.0f, 1.0f }, FACE_RIGHT } } },
+	// BOTTOM (normal: 0, -1, 0)
+	{ .vertices = { { { -0.5f, -0.5f, -0.5f }, { 1.0f, 0.0f }, FACE_BOTTOM }, { { 0.5f, -0.5f, -0.5f }, { 0.0f, 0.0f }, FACE_BOTTOM }, { { 0.5f, -0.5f, 0.5f }, { 0.0f, 1.0f }, FACE_BOTTOM }, { { 0.5f, -0.5f, 0.5f }, { 0.0f, 1.0f }, FACE_BOTTOM }, { { -0.5f, -0.5f, 0.5f }, { 1.0f, 1.0f }, FACE_BOTTOM }, { { -0.5f, -0.5f, -0.5f }, { 1.0f, 0.0f }, FACE_BOTTOM } } },
+	// TOP (normal: 0, 1, 0)
+	{ .vertices = { { { 0.5f, 0.5f, 0.5f }, { 1.0f, 1.0f }, FACE_TOP }, { { 0.5f, 0.5f, -0.5f }, { 1.0f, 0.0f }, FACE_TOP }, { { -0.5f, 0.5f, -0.5f }, { 0.0f, 0.0f }, FACE_TOP }, { { -0.5f, 0.5f, -0.5f }, { 0.0f, 0.0f }, FACE_TOP }, { { -0.5f, 0.5f, 0.5f }, { 0.0f, 1.0f }, FACE_TOP }, { { 0.5f, 0.5f, 0.5f }, { 1.0f, 1.0f }, FACE_TOP } } }
+};
+
+void add_face_to_buffer(ChunkVertsScratch *buffer, int x, int y, int z, BLOCKTYPE type, CubeFace face, BlockLight light)
 {
-	FaceVertices *face_verts = &cube_vertices[face];
+	FaceVertices face_verts = cube_vertices[face];
 
+	VASSERT_MSG(buffer->lvl + sizeof(FaceVertices) / sizeof(Vertex) <= buffer->cap, "Vertex buffer overflow!");
 	for (size_t i = 0; i < VERTICES_PER_FACE; i++) {
-		float *vertex_data = face_verts->vertices[i];
-		float px = vertex_data[0] + 0.5f + (float)x;
-		float py = vertex_data[1] + 0.5f + (float)y;
-		float pz = vertex_data[2] + 0.5f + (float)z;
+		Vertex *vertex_data = &face_verts.vertices[i];
 
-		float local_u = vertex_data[3];
-		float local_v = vertex_data[4];
+		vertex_data->pos[0] += 0.5f + (float)x;
+		vertex_data->pos[1] += 0.5f + (float)y;
+		vertex_data->pos[2] += 0.5f + (float)z;
+
+		float local_u = vertex_data->tex[0];
+		float local_v = vertex_data->tex[1];
 
 		float u, v;
 		texture_get_uv_vertex(local_u, local_v, type, face, &u, &v);
+		vertex_data->tex[0] = u;
+		vertex_data->tex[1] = v;
 
-		VASSERT_MSG(buffer->fill + FLOATS_PER_VERTEX <= CHUNK_TOTAL_VERTICES * FLOATS_PER_VERTEX, "Vertex buffer overflow!");
-
-		buffer->data[buffer->fill++] = px;
-		buffer->data[buffer->fill++] = py;
-		buffer->data[buffer->fill++] = pz;
-		buffer->data[buffer->fill++] = u;
-		buffer->data[buffer->fill++] = v;
+		vertex_data->norm |= face & 0xFF;
+		vertex_data->light = light;
+		buffer->data[buffer->lvl++] = *vertex_data;
 	}
 }
 
@@ -515,6 +488,7 @@ void add_block_faces_to_buffer(Chunk *chunk, ChunkVertsScratch *tmp_chunk_verts,
 	};
 
 	Block *block = chunk_xyz_at(chunk, x, y, z);
+	BlockLight light = block->light;
 	if (!block || !block->obstructing)
 		return;
 
@@ -525,7 +499,7 @@ void add_block_faces_to_buffer(Chunk *chunk, ChunkVertsScratch *tmp_chunk_verts,
 
 		Block *neighbor = chunk_xyz_at(chunk, nx, ny, nz);
 		if (!neighbor || !neighbor->obstructing) {
-			add_face_to_buffer(tmp_chunk_verts, x, y, z, block->type, face);
+			add_face_to_buffer(tmp_chunk_verts, x, y, z, block->type, face, light);
 		}
 	}
 }
@@ -556,7 +530,7 @@ void chunk_generate_mesh(OGLPool *pool, Chunk *chunk, ChunkVertsScratch *tmp_chu
 			}
 		}
 	}
-	chunk->vertex_count = tmp_chunk_verts->fill / FLOATS_PER_VERTEX;
+	chunk->vertex_count = tmp_chunk_verts->lvl;
 
 	if (chunk->vertex_count == 0) {
 		VERROR("This guy:");
@@ -574,7 +548,7 @@ void chunk_generate_mesh(OGLPool *pool, Chunk *chunk, ChunkVertsScratch *tmp_chu
 	glBindVertexArray(item->VAO);
 	glBindBuffer(GL_ARRAY_BUFFER, item->VBO);
 	glBufferData(GL_ARRAY_BUFFER,
-		     tmp_chunk_verts->fill * sizeof(float),
+		     tmp_chunk_verts->lvl * sizeof(tmp_chunk_verts->data[0]),
 		     tmp_chunk_verts->data,
 		     chunk->updates_this_cycle > 2 ? GL_DYNAMIC_DRAW : GL_STATIC_DRAW);
 	chunk->has_vbo_data = true;
@@ -759,7 +733,6 @@ typedef struct {
 void render(GameState *game_state, WindowData window, ShaderData shader_data, ChunkVertsScratch tmp_chunk_verts)
 {
 	mat4 view;
-
 	vec3 camera_pos_plus_front;
 	Camera *camera = &game_state->world.player.camera;
 
@@ -768,26 +741,21 @@ void render(GameState *game_state, WindowData window, ShaderData shader_data, Ch
 
 	mat4 projection = { 0 };
 	float aspect = (float)window.width / (float)window.height;
-
-	float chunkRadius = RENDER_DISTANCE_X * CHUNK_TOTAL_X;
-	float farPlane = sqrt(3 * chunkRadius * chunkRadius);
-	// glm_perspective(glm_rad(game_state->camera.fov), aspect, 0.1f, 500.0f, projection);
-	glm_perspective(glm_rad(camera->fov), aspect, 0.1f, farPlane, projection);
+	glm_perspective(glm_rad(camera->fov), aspect, 0.1f, 500.0f, projection);
 
 	glClearColor(0.39f, 0.58f, 0.92f, 1.0f);
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-	glUniformMatrix4fv(shader_data.view_loc, 1, GL_FALSE, (const float *)view);
+	glUseProgram(shader_data.program);
 
+	glUniformMatrix4fv(shader_data.view_loc, 1, GL_FALSE, (const float *)view);
 	glUniformMatrix4fv(shader_data.projection_loc, 1, GL_FALSE, (const float *)projection);
 
-	// GL_CHECK((void)0);// TODO:reenable
-
 	world_render(&game_state->world, &tmp_chunk_verts, shader_data);
-	// print_pool(&game_state->world.pool);
 
 	glfwSwapBuffers(window.glfw);
 	glfwPollEvents();
+	GL_CHECK((void)0); // TODO:reenable
 }
 
 typedef struct {
@@ -816,8 +784,79 @@ void player_place_block(ChunkPool *pool, OGLPool *ogl, RenderMap *map, const Wor
 	pool_update_block(pool, ogl, map, pos, &block, seed, true);
 	memset(block, 0, sizeof(*block));
 	block->obstructing = true;
-	block->type = BlocktypeGrass;
+	block->type = BlocktypeStone;
+	block_make_light(block, (Color){ rand() % 255, rand() % 255, rand() % 255, 1 }, 31);
 }
+
+/*
+void light_propagate(World *world, ChunkPool *pool, Blockpos *pos, Blocklight light)
+{
+	if (light_level == 0)
+		return;
+
+	static LightNode queue[CHUNK_TOTAL_BLOCKS * 27];
+	size_t front = 0, rear = 0;
+
+	queue[rear++] = (LightNode){ x, y, z };
+
+	while (front < rear) {
+		LightNode node = queue[front++];
+
+		// Propagate to 6 neighboring blocks
+		LightNode neighbors[] = {
+			{ node.x - 1, node.y, node.z },
+			{ node.x + 1, node.y, node.z },
+			{ node.x, node.y - 1, node.z },
+			{ node.x, node.y + 1, node.z },
+			{ node.x, node.y, node.z - 1 },
+			{ node.x, node.y, node.z + 1 }
+		};
+
+		for (int i = 0; i < 6; i++) {
+			LightNode neighbor = neighbors[i];
+
+			// Get the block at this position
+			WorldCoord coord = { neighbor.x, neighbor.y, neighbor.z };
+			size_t chunk_index;
+			world_cord_to_chunk_and_block(coord);
+			if (!chunk_at(pool, &coord, &chunk_index))
+				continue;
+
+			Chunk *chunk = &pool->chunk[chunk_index];
+			Block *block = chunk_xyz_at(chunk,
+						    neighbor.x - chunk->coord.x * CHUNK_TOTAL_X,
+						    neighbor.y - chunk->coord.y * CHUNK_TOTAL_Y,
+						    neighbor.z - chunk->coord.z * CHUNK_TOTAL_Z);
+
+			if (!block)
+				continue;
+
+			// Skip obstructing blocks (unless they're transparent like glass)
+			if (block->obstructing && !is_transparent_block(block->type))
+				continue;
+
+			// Calculate new light level
+			uint8_t new_level = light_level - 1;
+			if (new_level > LIGHT_MAX_LEVEL)
+				continue;
+
+			// Only update if we're providing more light than what's already there
+			if (new_level > block->light_level) {
+				block->light_level = new_level;
+
+				if (block->light_level == new_level) {
+					block->light_color[0] = r;
+					block->light_color[1] = g;
+					block->light_color[2] = b;
+				}
+
+				// Continue propagation
+				queue[rear++] = neighbor;
+			}
+		}
+	}
+}
+*/
 
 int main()
 {
@@ -926,14 +965,17 @@ int main()
 	glfwSetWindowFocusCallback(window.glfw, window_focus_callback);
 	// glfwSetMouseButtonCallback(window.glfw, mouse_button_callback);
 
-	static float tmp_chunk_verts_data[CHUNK_TOTAL_VERTICES];
-	ChunkVertsScratch tmp_chunk_verts = { .data = tmp_chunk_verts_data, .fill = 0 };
+	static Vertex tmp_chunk_verts_data[CHUNK_TOTAL_VERTICES];
+	ChunkVertsScratch tmp_chunk_verts = { .data = tmp_chunk_verts_data, .lvl = 0, .cap = ARRAY_LEN(tmp_chunk_verts_data) };
 
 	{
 		shader_data.view_loc = glGetUniformLocation(shader_data.program, "view");
 		shader_data.projection_loc = glGetUniformLocation(shader_data.program, "projection");
 		shader_data.model_loc = glGetUniformLocation(shader_data.program, "model");
 	}
+
+	BlockLight light = color_and_range_to_blocklight((Color){ 255, 255, 0, 1 }, 15);
+	print_blocklight(light);
 
 	Player *player = &world->player;
 	while (!glfwWindowShouldClose(window.glfw)) {
