@@ -8,6 +8,7 @@
 #include <stdlib.h>
 #include "vassert.h"
 #include "logs.h"
+#include <string.h>
 #include <time.h>
 #include "loadopengl.h"
 #define STB_IMAGE_IMPLEMENTATION
@@ -18,6 +19,7 @@
 #include "map.h"
 #include "pool.h"
 #include "oglpool.h"
+#include "mesh.h"
 
 #include "shaders/vert2.c"
 #include "shaders/frag2.c"
@@ -35,6 +37,14 @@ typedef struct {
 } ShaderData;
 
 typedef struct {
+	WorldCoord *coords;
+	Block *blocks;
+	size_t num_blocks;
+	size_t capacity; // might need multi-buffer operations at some point, preferrably not
+} BlockBuffer; // might also want a ring buffer that processes these guys
+// maybe have logic processing be bound by some kind of power generator that limits the ammount of affected blocks to the buffer size
+
+typedef struct {
 	vec3 pos;
 	vec3 front;
 	vec3 up;
@@ -43,6 +53,42 @@ typedef struct {
 	float fov;
 } Camera;
 
+static inline bool is_power_of_two(size_t n)
+{
+	return n && !(n & (n - 1));
+}
+#define NANOS_PER_SEC (1000 * 1000 * 1000)
+uint64_t nanos_since_unspecified_epoch(void) // from nob.h
+{
+#ifdef _WIN32
+	LARGE_INTEGER Time;
+	QueryPerformanceCounter(&Time);
+
+	static LARGE_INTEGER Frequency = { 0 };
+	if (Frequency.QuadPart == 0) {
+		QueryPerformanceFrequency(&Frequency);
+	}
+
+	uint64_t Secs = Time.QuadPart / Frequency.QuadPart;
+	uint64_t Nanos = Time.QuadPart % Frequency.QuadPart * NANOS_PER_SEC / Frequency.QuadPart;
+	return NANOS_PER_SEC * Secs + Nanos;
+#else
+	struct timespec ts;
+	clock_gettime(CLOCK_MONOTONIC, &ts);
+
+	return NANOS_PER_SEC * ts.tv_sec + ts.tv_nsec;
+#endif // _WIN32
+}
+
+typedef enum {
+	FACE_BACK = 0,
+	FACE_FRONT,
+	FACE_LEFT,
+	FACE_RIGHT,
+	FACE_BOTTOM,
+	FACE_TOP
+} CubeFace;
+
 void print_blocklight(BlockLight light)
 {
 	VINFO("r: %u", light >> 8 * 3 & 0xFF);
@@ -50,7 +96,6 @@ void print_blocklight(BlockLight light)
 	VINFO("b: %u", light >> 8 * 1 & 0xFF);
 	VINFO("range: %u", light >> 8 * 0 & 0xFF);
 }
-
 
 /* #define FOR_CHUNKS_IN_RENDERDISTANCE(...)                                             \
 // 	for (int z = -RENDER_DISTANCE_Z; z <= RENDER_DISTANCE_Z; z++)                 \
@@ -71,7 +116,7 @@ typedef struct {
 	ChunkPool pool;
 	OGLPool ogl_pool;
 	RenderMap render_map;
-
+	MeshQueue mesh;
 	size_t chunk_count;
 	Player player;
 	size_t seed;
@@ -87,15 +132,6 @@ typedef struct {
 } GameState;
 
 GameState game_state = { 0 };
-
-typedef enum {
-	FACE_BACK = 0,
-	FACE_FRONT,
-	FACE_LEFT,
-	FACE_RIGHT,
-	FACE_BOTTOM,
-	FACE_TOP
-} CubeFace;
 
 typedef struct {
 	vec3 positions[VERTICES_PER_QUAD];
@@ -448,9 +484,8 @@ void chunk_render(OGLPool *pool, Chunk *chunk, ShaderData shader_data)
 		// VERROR("This guy again:");
 		return;
 	}
-	// print_chunk(chunk);
 
-	VASSERT_MSG(chunk->contains_blocks, "How did it get here?");
+	VASSERT_MSG(chunk->block_count != 0, "How did it get here?");
 	VASSERT_MSG(pool->items[chunk->oglpool_index].references > 0, "How did it get here?");
 	VASSERT_MSG(chunk->face_count > 0, "How did it get here?");
 
@@ -473,7 +508,6 @@ void chunk_render(OGLPool *pool, Chunk *chunk, ShaderData shader_data)
 
 	GL_CHECK(glDrawElements(GL_TRIANGLES, index_count, GL_UNSIGNED_SHORT, 0));
 	// GL_CHECK(glDrawArrays(GL_TRIANGLES, 0, chunk->vertex_count));
-	// GL_CHECK(print_chunk(chunk));
 }
 
 void vec3_assign(vec3 v, float x, float y, float z)
@@ -551,113 +585,11 @@ static inline void const_vec3_copy(const vec3 a, vec3 dest)
 	dest[2] = a[2];
 }
 
-void add_face_to_buffer(ChunkVertsScratch *buffer, int x, int y, int z, BLOCKTYPE type, CubeFace face, BlockLight light)
-{
-	// FaceVertices face_verts = cube_vertices[face];
-	const CubeFaceDef *face_def = &cube_faces[face];
-
-	VASSERT_MSG(buffer->lvl + sizeof(FaceVertices) / sizeof(Vertex) <= buffer->cap, "Vertex buffer overflow!");
-	for (size_t i = 0; i < VERTICES_PER_QUAD; i++) {
-		Vertex vertex = { 0 };
-
-		const_vec3_copy(face_def->positions[i], vertex.pos);
-		// vertex.pos[0] +=  (float)x;
-		// vertex.pos[1] +=  (float)y;
-		// vertex.pos[2] +=  (float)z;
-		vertex.pos[0] += 0.5f + (float)x;
-		vertex.pos[1] += 0.5f + (float)y;
-		vertex.pos[2] += 0.5f + (float)z;
-
-		texture_get_uv_vertex(face_def->tex_coords[i][0],
-				      face_def->tex_coords[i][1],
-				      type, face, &vertex.tex[0], &vertex.tex[1]);
-
-		vertex.norm |= face & 0x07;
-		vertex.light = light;
-		buffer->data[buffer->lvl++] = vertex;
-	}
-}
-
-void add_block_faces_to_buffer(Chunk *chunk, ChunkVertsScratch *tmp_chunk_verts, int x, int y, int z)
-{
-	static const vec3 face_offsets[FACES_PER_CUBE] = {
-		{ 0, 0, -1 },
-		{ 0, 0, 1 },
-		{ -1, 0, 0 },
-		{ 1, 0, 0 },
-		{ 0, -1, 0 },
-		{ 0, 1, 0 }
-	};
-
-	Block *block = chunk_xyz_at(chunk, x, y, z);
-	BlockLight light = block->light;
-	if (!block || !block->obstructing)
-		return;
-
-	for (CubeFace face = FACE_BACK; face <= FACE_TOP; face++) {
-		int nx = x + face_offsets[face][0];
-		int ny = y + face_offsets[face][1];
-		int nz = z + face_offsets[face][2];
-
-		Block *neighbor = chunk_xyz_at(chunk, nx, ny, nz);
-		if (!neighbor || !neighbor->obstructing) {
-			add_face_to_buffer(tmp_chunk_verts, x, y, z, block->type, face, light);
-		}
-	}
-}
 void print_block(Block *block)
 {
 	VINFO("Block: %p", block);
 	VINFO("BlockType: %s", BlockTypeString[block->type]);
 	VINFO("Obstructing: %s", block->obstructing ? "true" : "false");
-}
-
-void chunk_generate_mesh(OGLPool *pool, Chunk *chunk, ChunkVertsScratch *tmp_chunk_verts)
-{
-	if (chunk->up_to_date || !chunk->contains_blocks)
-		return;
-	VASSERT(chunk->data != NULL);
-
-	chunk->unchanged_render_count = 0;
-	clear_chunk_verts_scratch(tmp_chunk_verts);
-	for (size_t z = 0; z < CHUNK_TOTAL_Z; z++) {
-		for (size_t y = 0; y < CHUNK_TOTAL_Y; y++) {
-			for (size_t x = 0; x < CHUNK_TOTAL_X; x++) {
-				Block *block = &chunk->data[CHUNK_INDEX(x, y, z)];
-				// chunk->data[CHUNK_INDEX(x, y, z)];
-				if (!block->obstructing)
-					continue;
-
-				add_block_faces_to_buffer(chunk, tmp_chunk_verts, x, y, z);
-			}
-		}
-	}
-	chunk->face_count = tmp_chunk_verts->lvl / VERTICES_PER_QUAD;
-
-	if (chunk->face_count == 0) {
-		VERROR("This guy:");
-		print_chunk(chunk);
-		print_block(&chunk->data[0]);
-		return;
-	}
-	if (!chunk->has_oglpool_reference) {
-		oglpool_claim_chunk(pool, chunk);
-	}
-	VASSERT(chunk->has_oglpool_reference);
-	OGLItem *item = &pool->items[chunk->oglpool_index];
-	VASSERT_MSG(item->references > 0, "How did it get here?");
-
-	glBindVertexArray(item->VAO);
-
-	glBindBuffer(GL_ARRAY_BUFFER, item->VBO);
-	glBufferData(GL_ARRAY_BUFFER,
-		     tmp_chunk_verts->lvl * sizeof(tmp_chunk_verts->data[0]),
-		     tmp_chunk_verts->data,
-		     chunk->updates_this_cycle > 2 ? GL_DYNAMIC_DRAW : GL_STATIC_DRAW);
-	// GL_CHECK(glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, pool->fullblock_EBO));
-	chunk->has_vbo_data = true;
-
-	chunk->up_to_date = true;
 }
 
 typedef struct {
@@ -687,77 +619,36 @@ void world_init(World *world)
 
 	oglpool_init(&world->ogl_pool, MAX_VISIBLE_CHUNKS * 2);
 	rendermap_init(&world->render_map, 2 * 2048, 2);
+	meshqueue_init(&world->mesh, 2048);
 
-	pool_reserve(&world->pool, world->pool.cap);
-
-	size_t pl = 0;
-	ChunkIterator it = {
-		.coord.x = -RENDER_DISTANCE_X,
-		.x_min = -RENDER_DISTANCE_X,
-		.x_max = RENDER_DISTANCE_X,
-		.coord.y = -RENDER_DISTANCE_Y,
-		.y_min = -RENDER_DISTANCE_Y,
-		.y_max = RENDER_DISTANCE_Y,
-		.coord.z = -RENDER_DISTANCE_Z,
-		.z_min = -RENDER_DISTANCE_Z,
-		.z_max = RENDER_DISTANCE_Z
-	};
+	pool_reserve(&world->pool);
 
 	world->seed = time(NULL);
-	do {
-		ChunkCoord coord = { it.coord.x, it.coord.y, it.coord.z };
-		if (pl == world->pool.lvl)
-			goto done;
-		chunk_load(&world->pool.chunk[pl], &coord, world->seed);
-		pl++;
-	} while (next_chunk(&it));
-	chunk_load(&world->pool.chunk[0], &(ChunkCoord){ 0, 0, 0 }, world->seed);
 
-// pool_load(&world->pool, (ChunkCoord){ 0, 0, 0 });
-done:
-	return;
-}
+	// size_t pl = 0;
+	// ChunkIterator it = {
+	// 	.coord.x = -RENDER_DISTANCE_X,
+	// 	.x_min = -RENDER_DISTANCE_X,
+	// 	.x_max = RENDER_DISTANCE_X,
+	// 	.coord.y = -RENDER_DISTANCE_Y,
+	// 	.y_min = -RENDER_DISTANCE_Y,
+	// 	.y_max = RENDER_DISTANCE_Y,
+	// 	.coord.z = -RENDER_DISTANCE_Z,
+	// 	.z_min = -RENDER_DISTANCE_Z,
+	// 	.z_max = RENDER_DISTANCE_Z
+	// };
+	// do {
+	// 	ChunkCoord coord = { it.coord.x, it.coord.y, it.coord.z };
+	// 	if (pl == world->pool.lvl)
+	// 		goto done;
+	// 	chunk_load(&world->pool.chunk[pl], &coord, world->seed);
+	// 	pl++;
+	// } while (next_chunk(&it));
+	// chunk_load(&world->pool.chunk[0], &(ChunkCoord){ 0, 0, 0 }, world->seed);
 
-void world_render(World *world, ChunkVertsScratch *tmp_chunk_verts, ShaderData shader_data)
-{
-	for (size_t i = 0; i < world->pool.lvl; i++) {
-		Chunk *chunk = &world->pool.chunk[i];
-		VASSERT(chunk->data != NULL);
-		chunk_generate_mesh(&world->ogl_pool, chunk, tmp_chunk_verts);
-
-		// TODO: add an empty map for empty chunks
-		// if (world->pool.chunk[i].up_to_date) {
-		rendermap_add(&world->render_map, &world->ogl_pool, chunk);
-		if (chunk->modified && chunk->contains_blocks) {
-			if (chunk->cycles_since_update > 400) {
-				disk_save(chunk, world->uid);
-				pool_empty(&world->pool, &world->ogl_pool, i);
-			}
-			chunk->cycles_since_update++;
-		} else // TODO:dont do this, maybe do keep it around for a while
-			pool_empty(&world->pool, &world->ogl_pool, i);
-	}
-
-	for (int z = -RENDER_DISTANCE_Z; z <= RENDER_DISTANCE_Z; z++) {
-		for (int y = -RENDER_DISTANCE_Y; y <= RENDER_DISTANCE_Y; y++) {
-			for (int x = -RENDER_DISTANCE_X; x <= RENDER_DISTANCE_X; x++) {
-				ChunkCoord coord = {
-					world->player.chunk_pos.x + x,
-					world->player.chunk_pos.y + y,
-					world->player.chunk_pos.z + z
-				};
-				Chunk chunk = { 0 };
-				if (rendermap_get_chunk(&world->render_map, &chunk, &coord)) {
-					// VINFO("hi");
-					// print_chunk(&chunk);
-					chunk_render(&world->ogl_pool, &chunk, shader_data);
-				}
-			}
-		}
-	}
-
-	// ChunkCoord player_chunk = world_coord_to_chunk(world->player.pos);
-	// VINFO("Player coords: %i %i %i", player_chunk.x, player_chunk.y, player_chunk.z);
+	// pool_load(&world->pool, (ChunkCoord){ 0, 0, 0 });
+	// done:
+	// 	return;
 }
 
 void rendermap_keep_only_in_range(RenderMap *map, OGLPool *pool)
@@ -793,35 +684,6 @@ void rendermap_clean_maybe(RenderMap *map, OGLPool *pool)
 	}
 }
 
-void world_update(World *world)
-{
-	rendermap_clean_maybe(&world->render_map, &world->ogl_pool);
-
-	// if (world->pool.lvl < world->pool.cap) {
-	// TODO: something better (or separate thread)
-	ChunkCoord new_chunk = world_coord_to_chunk(&world->player.pos);
-	// if (new_chunk.x != world->player.chunk_pos.x ||
-	//     new_chunk.y != world->player.chunk_pos.y ||
-	//     new_chunk.z != world->player.chunk_pos.z) {
-	world->player.chunk_pos = new_chunk;
-	for (int z = -RENDER_DISTANCE_Z; z <= RENDER_DISTANCE_Z; z++) {
-		for (int y = -RENDER_DISTANCE_Y; y <= RENDER_DISTANCE_Y; y++) {
-			for (int x = -RENDER_DISTANCE_X; x <= RENDER_DISTANCE_X; x++) {
-				ChunkCoord coord = {
-					world->player.chunk_pos.x + x,
-					world->player.chunk_pos.y + y,
-					world->player.chunk_pos.z + z
-				};
-
-				size_t index;
-				pool_load_relaxed(&world->pool, &world->render_map, &coord, &index, world->seed);
-				// VINFO("Trying to load: %i %i %i", coord.x, coord.y, coord.z);
-				// VINFO("Loaded index: %i", index);
-			}
-		}
-	}
-	// }
-}
 void player_update(Player *player)
 {
 	player->pos.x = floorf(player->camera.pos[0]);
@@ -834,32 +696,38 @@ typedef struct {
 	int width;
 	int height;
 } WindowData;
-void render(GameState *game_state, WindowData window, ShaderData shader_data, ChunkVertsScratch tmp_chunk_verts)
+
+void print_meshqueue(MeshQueue *mesh)
 {
-	mat4 view;
-	vec3 camera_pos_plus_front;
-	Camera *camera = &game_state->world.player.camera;
+	VINFO("Amount :%i", (mesh->writei) - (mesh->readi));
+}
 
-	glm_vec3_add(camera->pos, camera->front, camera_pos_plus_front);
-	glm_lookat(camera->pos, camera_pos_plus_front, camera->up, view);
+void world_render(World *world, ChunkVertsScratch *tmp_chunk_verts, ShaderData shader_data)
+{
+	time_t current_time = time(NULL);
+	// if ((world->mesh.writei - world->mesh.readi) != 0)
+	// 	print_meshqueue(&world->mesh);
+	meshqueue_process(&world->mesh, &world->pool, &world->render_map, &world->ogl_pool, tmp_chunk_verts, world->seed);
 
-	mat4 projection = { 0 };
-	float aspect = (float)window.width / (float)window.height;
-	glm_perspective(glm_rad(camera->fov), aspect, 0.1f, 500.0f, projection);
+	for (int z = -RENDER_DISTANCE_Z; z <= RENDER_DISTANCE_Z; z++) {
+		for (int y = -RENDER_DISTANCE_Y; y <= RENDER_DISTANCE_Y; y++) {
+			for (int x = -RENDER_DISTANCE_X; x <= RENDER_DISTANCE_X; x++) {
+				ChunkCoord coord = {
+					world->player.chunk_pos.x + x,
+					world->player.chunk_pos.y + y,
+					world->player.chunk_pos.z + z
+				};
+				Chunk chunk = { 0 };
+				if (rendermap_get_chunk(&world->render_map, &chunk, &coord)) {
+					// VINFO("hi");
+					chunk_render(&world->ogl_pool, &chunk, shader_data);
+				}
+			}
+		}
+	}
 
-	glClearColor(0.39f, 0.58f, 0.92f, 1.0f);
-	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-
-	glUseProgram(shader_data.program);
-
-	glUniformMatrix4fv(shader_data.view_loc, 1, GL_FALSE, (const float *)view);
-	glUniformMatrix4fv(shader_data.projection_loc, 1, GL_FALSE, (const float *)projection);
-
-	world_render(&game_state->world, &tmp_chunk_verts, shader_data);
-
-	glfwSwapBuffers(window.glfw);
-	glfwPollEvents();
-	GL_CHECK((void)0);
+	// ChunkCoord player_chunk = world_coord_to_chunk(world->player.pos);
+	// VINFO("Player coords: %i %i %i", player_chunk.x, player_chunk.y, player_chunk.z);
 }
 
 typedef struct {
@@ -867,29 +735,43 @@ typedef struct {
 	vec3 direction;
 } Ray;
 
+Block blocktype_to_block(BLOCKTYPE type)
+{
+	Block block = { 0 };
+	switch (type) {
+	case BlocktypeGrass:
+		block.obstructing = true;
+		block.type = BlocktypeGrass;
+		break;
+	case BlocktypeStone:
+		block.obstructing = true;
+		block.type = BlocktypeStone;
+		block_make_light(&block, (Color){ rand() % 255, rand() % 255, rand() % 255, 1 }, 15);
+		break;
+	default:
+		break;
+	}
+	return block;
+}
+
 void player_print_block(Player *player, OGLPool *ogl, RenderMap *map, ChunkPool *pool, size_t seed)
 {
-	Block *block = NULL;
-	pool_update_block(pool, ogl, map, &player->pos, &block, seed, false);
+	Block block = pool_read_block(pool, ogl, map, &player->pos, seed);
 	VINFO("Pos: x: %i, y: %i, z: %i", player->pos.x, player->pos.y, player->pos.z);
-	print_block(block);
+	print_block(&block);
 }
 void player_break_block(ChunkPool *pool, OGLPool *ogl, RenderMap *map, const WorldCoord *pos, size_t seed)
 {
 	// TODO: check if player is actually allowed to
-	Block *block = NULL;
-	pool_update_block(pool, ogl, map, pos, &block, seed, false);
-	memset(block, 0, sizeof(*block));
+	Block block = { 0 };
+	pool_replace_block(pool, ogl, map, pos, block, seed);
 }
-void player_place_block(ChunkPool *pool, OGLPool *ogl, RenderMap *map, const WorldCoord *pos, size_t seed)
+void player_place_block(BLOCKTYPE blocktype, ChunkPool *pool, OGLPool *ogl, RenderMap *map, const WorldCoord *pos, size_t seed)
 {
 	// TODO: check if player is actually allowed to
-	Block *block = NULL;
-	pool_update_block(pool, ogl, map, pos, &block, seed, true);
-	memset(block, 0, sizeof(*block));
-	block->obstructing = true;
-	block->type = BlocktypeStone;
-	block_make_light(block, (Color){ rand() % 255, rand() % 255, rand() % 255, 1 }, 15);
+	Block block = blocktype_to_block(blocktype);
+
+	pool_replace_block(pool, ogl, map, pos, block, seed);
 }
 
 /*
@@ -961,6 +843,325 @@ void light_propagate(World *world, ChunkPool *pool, Blockpos *pos, Blocklight li
 	}
 }
 */
+
+static inline bool blockpos_within_chunk(BlockPos *block_pos)
+{
+	return block_pos->x >= 0 && block_pos->x < CHUNK_TOTAL_X && block_pos->z >= 0 && block_pos->z < CHUNK_TOTAL_Z && block_pos->y >= 0 && block_pos->y < CHUNK_TOTAL_Y;
+}
+static inline Block chunk_blockpos_at(const Chunk *chunk, const BlockPos *pos)
+{
+	return chunk->data[CHUNK_INDEX(pos->x, pos->y, pos->z)];
+}
+
+#define MESH_CHUNKS_INVOLVED 27
+#define MESH_INVOLVED_CENTRE 14
+#define MESH_INVOLVED_STRIDE_Y 9
+#define MESH_INVOLVED_STRIDE_Z 3
+void meshqueue_init(MeshQueue *mesh, size_t cap)
+{
+	VASSERT(is_power_of_two(cap));
+	const size_t chunks_involved = 27; // for the chunk itself and the 8 surrounding
+	mesh->mask = cap - 1;
+	mesh->chunks = calloc(cap, sizeof(mesh->chunks[0]));
+	VASSERT_RELEASE_MSG(mesh->chunks != NULL, "Buy more RAM");
+	mesh->blockdata = calloc(MESH_CHUNKS_INVOLVED * CHUNK_TOTAL_BLOCKS, sizeof(mesh->blockdata[0]));
+	VASSERT_RELEASE_MSG(mesh->blockdata != NULL, "Buy more RAM");
+	mesh->involved = calloc(MESH_CHUNKS_INVOLVED * CHUNK_TOTAL_BLOCKS, sizeof(mesh->involved[0]));
+	VASSERT_RELEASE_MSG(mesh->blockdata != NULL, "Buy more RAM");
+
+	for (size_t i = 0; i < MESH_CHUNKS_INVOLVED; i++) {
+		Chunk chunk = { 0 };
+		chunk.data = mesh->blockdata + i * CHUNK_TOTAL_BLOCKS;
+		mesh->involved[i] = chunk;
+	}
+}
+
+void meshqueue_add(MeshQueue *mesh, const ChunkCoord coord)
+{
+	if (mesh->writei - mesh->readi > mesh->mask)
+		mesh->readi = mesh->writei - mesh->mask;
+
+	mesh->chunks[mesh->writei & mesh->mask] = coord;
+	mesh->writei++;
+}
+bool meshqueue_get(MeshQueue *mesh, ChunkCoord *coord)
+{
+	if (mesh->readi == mesh->writei)
+		return false;
+	*coord = mesh->chunks[mesh->readi & mesh->mask];
+	mesh->readi++;
+	return true;
+}
+void mesh_request(RenderMap *map, MeshQueue *mesh, const ChunkCoord *coord)
+{
+	Chunk chunk = { 0 };
+	// TODO: two queues, priority for modifications, new loads after
+	if (rendermap_get_chunk(map, &chunk, coord)) {
+		// print_chunk(&chunk);
+		if (chunk.up_to_date || chunk.block_count == 0)
+			return;
+	}
+	meshqueue_add(mesh, *coord);
+}
+
+void mesh_add_face(ChunkVertsScratch *buffer, const BlockPos *pos, BLOCKTYPE type, CubeFace face, BlockLight light)
+{
+	// FaceVertices face_verts = cube_vertices[face];
+	const CubeFaceDef *face_def = &cube_faces[face];
+
+	VASSERT_MSG(buffer->lvl + sizeof(FaceVertices) / sizeof(Vertex) <= buffer->cap, "Vertex buffer overflow!");
+	for (size_t i = 0; i < VERTICES_PER_QUAD; i++) {
+		Vertex vertex = { 0 };
+
+		const_vec3_copy(face_def->positions[i], vertex.pos);
+		// vertex.pos[0] +=  (float)x;
+		// vertex.pos[1] +=  (float)y;
+		// vertex.pos[2] +=  (float)z;
+		vertex.pos[0] += 0.5f + (float)pos->x;
+		vertex.pos[1] += 0.5f + (float)pos->y;
+		vertex.pos[2] += 0.5f + (float)pos->z;
+
+		texture_get_uv_vertex(face_def->tex_coords[i][0],
+				      face_def->tex_coords[i][1],
+				      type, face, &vertex.tex[0], &vertex.tex[1]);
+
+		vertex.norm |= face & 0x07;
+		vertex.light = light;
+		buffer->data[buffer->lvl++] = vertex;
+	}
+}
+
+static inline Block meshqueue_block_at(MeshQueue *mesh, BlockPos *pos)
+{
+	int64_t cx = 0;
+	int64_t cy = 0;
+	int64_t cz = 0;
+
+	if (pos->x < 0) {
+		cx = -1;
+	} else if (pos->x >= CHUNK_TOTAL_X) {
+		cx = 1;
+	}
+
+	if (pos->y < 0) {
+		cy = -1;
+	} else if (pos->y >= CHUNK_TOTAL_Y) {
+		cy = 1;
+	}
+
+	if (pos->z < 0) {
+		cz = -1;
+	} else if (pos->z >= CHUNK_TOTAL_Z) {
+		cz = 1;
+	}
+
+	size_t chunk_index = (cy + 1) * MESH_INVOLVED_STRIDE_Y + (cz + 1) * MESH_INVOLVED_STRIDE_Z + (cx + 1);
+
+	int32_t lx = pos->x - cx * CHUNK_TOTAL_X;
+	int32_t ly = pos->y - cy * CHUNK_TOTAL_Y;
+	int32_t lz = pos->z - cz * CHUNK_TOTAL_Z;
+
+	size_t block_index_in_chunk = (ly * CHUNK_TOTAL_X + lz) * CHUNK_TOTAL_X + lx;
+
+	size_t involved_index = chunk_index * CHUNK_TOTAL_BLOCKS + block_index_in_chunk;
+	return mesh->blockdata[involved_index];
+}
+
+void mesh_add_block(MeshQueue *mesh, const BlockPos *pos, const Chunk *chunk, ChunkVertsScratch *scratch)
+{
+	static const vec3 face_offsets[FACES_PER_CUBE] = {
+		{ 0, 0, -1 },
+		{ 0, 0, 1 },
+		{ -1, 0, 0 },
+		{ 1, 0, 0 },
+		{ 0, -1, 0 },
+		{ 0, 1, 0 }
+	};
+
+	Block block = chunk_blockpos_at(chunk, pos);
+	BlockLight light = block.light;
+	if (!block.obstructing)
+		return;
+
+	for (CubeFace face = FACE_BACK; face <= FACE_TOP; face++) {
+		BlockPos neighbour_pos = { 0 };
+		neighbour_pos.x = pos->x + face_offsets[face][0];
+		neighbour_pos.y = pos->y + face_offsets[face][1];
+		neighbour_pos.z = pos->z + face_offsets[face][2];
+
+		Block neighbor = { 0 };
+		if (blockpos_within_chunk(&neighbour_pos))
+			neighbor = chunk_blockpos_at(chunk, &neighbour_pos);
+		else {
+			neighbor = meshqueue_block_at(mesh, &neighbour_pos);
+			// print_block(&neighbor);
+		}
+		if (!neighbor.obstructing) {
+			mesh_add_face(scratch, pos, block.type, face, light);
+		}
+	}
+}
+
+void meshqueue_chunk_load(ChunkPool *pool, Chunk *chunk, const ChunkCoord *coord, size_t seed)
+{
+	// TODO: cache
+	// TODO: pull latest from pool
+	chunk->last_used = time(NULL);
+	chunk->coord = *coord;
+	VASSERT(chunk->data != NULL);
+	size_t index;
+	if (pool_get_index(pool, chunk, &index)) {
+		memcpy(chunk->data, pool->chunk[index].data, sizeof(chunk->data[0]) * CHUNK_TOTAL_BLOCKS);
+		chunk->block_count = pool->chunk[index].block_count;
+		// VINFO("copied");
+		return;
+	}
+	chunk_generate_terrain(chunk, seed);
+}
+
+void mesh_compute(MeshQueue *mesh, ChunkPool *pool, ChunkVertsScratch *scratch, const ChunkCoord *coord, size_t seed)
+{
+	Chunk *wanted = &mesh->involved[MESH_INVOLVED_CENTRE];
+	size_t i = 0;
+	memset(mesh->blockdata, 0, sizeof(Block) * CHUNK_TOTAL_BLOCKS * MESH_CHUNKS_INVOLVED);
+	for (int64_t y = coord->y - 1; y <= coord->y + 1; y++)
+		for (int64_t z = coord->z - 1; z <= coord->z + 1; z++)
+			for (int64_t x = coord->x - 1; x <= coord->x + 1; x++) {
+				chunk_clear_metadata(&mesh->involved[i]);
+				meshqueue_chunk_load(pool, &mesh->involved[i], coord, seed);
+				i++;
+			}
+	for (size_t y = 0; y < CHUNK_TOTAL_Y; y++) {
+		for (size_t z = 0; z < CHUNK_TOTAL_Z; z++) {
+			for (size_t x = 0; x < CHUNK_TOTAL_X; x++) {
+				Block *block = &wanted->data[CHUNK_INDEX(x, y, z)];
+				// chunk->data[CHUNK_INDEX(x, y, z)];
+				if (!block->obstructing)
+					continue;
+				BlockPos pos = { .x = x, .y = y, .z = z };
+
+				mesh_add_block(mesh, &pos, wanted, scratch);
+			}
+		}
+	}
+}
+void mesh_upload_chunk(OGLPool *ogl, ChunkVertsScratch *scratch, Chunk *chunk)
+{
+	chunk->face_count = scratch->lvl / VERTICES_PER_QUAD;
+
+	if (chunk->face_count == 0) {
+		return;
+	}
+
+	if (!chunk->has_oglpool_reference) {
+		if (!oglpool_claim_chunk(ogl, chunk))
+			return;
+	}
+	VASSERT(chunk->has_oglpool_reference);
+	OGLItem *item = &ogl->items[chunk->oglpool_index];
+	VASSERT_MSG(item->references > 0, "How did it get here?");
+
+	glBindVertexArray(item->VAO);
+
+	glBindBuffer(GL_ARRAY_BUFFER, item->VBO);
+	glBufferData(GL_ARRAY_BUFFER,
+		     scratch->lvl * sizeof(scratch->data[0]),
+		     scratch->data,
+		     chunk->updates_this_cycle > 2 ? GL_DYNAMIC_DRAW : GL_STATIC_DRAW);
+	chunk->has_vbo_data = true;
+	chunk->up_to_date = true;
+}
+void meshqueue_process(MeshQueue *mesh, ChunkPool *pool, RenderMap *map, OGLPool *ogl, ChunkVertsScratch *scratch, size_t seed)
+{
+	ChunkCoord coord = { 0 };
+	Chunk *wanted = &mesh->involved[MESH_INVOLVED_CENTRE];
+
+	for (size_t i = 0; i < 512; i++)
+		if (meshqueue_get(mesh, &coord)) {
+			clear_chunk_verts_scratch(scratch);
+			mesh_compute(mesh, pool, scratch, &coord, seed);
+			mesh_upload_chunk(ogl, scratch, wanted);
+			// add to map and set up-to-date = true
+			rendermap_add(map, ogl, wanted);
+			if (wanted->has_oglpool_reference)
+				oglpool_release_chunk(ogl, wanted);
+		}
+}
+
+void world_update(World *world)
+{
+	rendermap_clean_maybe(&world->render_map, &world->ogl_pool);
+
+	for (size_t i = 0; i < world->pool.lvl; i++) {
+		Chunk *chunk = &world->pool.chunk[i];
+
+		// if (world->pool.chunk[i].up_to_date) {
+		if (chunk->updates_this_cycle > 0) {
+			VINFO("bye");
+			rendermap_outdate(&world->render_map, &chunk->coord);
+			chunk->cycles_since_update++;
+			chunk->updates_this_cycle = 0;
+		}
+
+		if (chunk->cycles_since_read > 400) {
+			if (chunk->modified)
+				disk_save(chunk, world->uid);
+			pool_empty(&world->pool, &world->ogl_pool, i);
+		}
+		chunk->cycles_since_read++;
+	}
+
+	// if (world->pool.lvl < world->pool.cap) {
+	// TODO: something better (or separate thread)
+	ChunkCoord new_chunk = world_coord_to_chunk(&world->player.pos);
+	// if (new_chunk.x != world->player.chunk_pos.x ||
+	//     new_chunk.y != world->player.chunk_pos.y ||
+	//     new_chunk.z != world->player.chunk_pos.z) {
+	world->player.chunk_pos = new_chunk;
+	for (int z = -RENDER_DISTANCE_Z; z <= RENDER_DISTANCE_Z; z++) {
+		for (int y = -RENDER_DISTANCE_Y; y <= RENDER_DISTANCE_Y; y++) {
+			for (int x = -RENDER_DISTANCE_X; x <= RENDER_DISTANCE_X; x++) {
+				ChunkCoord coord = {
+					world->player.chunk_pos.x + x,
+					world->player.chunk_pos.y + y,
+					world->player.chunk_pos.z + z
+				};
+
+				mesh_request(&world->render_map, &world->mesh, &coord);
+				// VINFO("Trying to load: %i %i %i", coord.x, coord.y, coord.z);
+				// VINFO("Loaded index: %i", index);
+			}
+		}
+	}
+	// }
+}
+void render(GameState *game_state, WindowData window, ShaderData shader_data, ChunkVertsScratch tmp_chunk_verts)
+{
+	mat4 view;
+	vec3 camera_pos_plus_front;
+	Camera *camera = &game_state->world.player.camera;
+
+	glm_vec3_add(camera->pos, camera->front, camera_pos_plus_front);
+	glm_lookat(camera->pos, camera_pos_plus_front, camera->up, view);
+
+	mat4 projection = { 0 };
+	float aspect = (float)window.width / (float)window.height;
+	glm_perspective(glm_rad(camera->fov), aspect, 0.1f, 500.0f, projection);
+
+	glClearColor(0.39f, 0.58f, 0.92f, 1.0f);
+	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+	glUseProgram(shader_data.program);
+
+	glUniformMatrix4fv(shader_data.view_loc, 1, GL_FALSE, (const float *)view);
+	glUniformMatrix4fv(shader_data.projection_loc, 1, GL_FALSE, (const float *)projection);
+
+	world_render(&game_state->world, &tmp_chunk_verts, shader_data);
+
+	glfwSwapBuffers(window.glfw);
+	glfwPollEvents();
+	GL_CHECK((void)0);
+}
 
 int main()
 {
@@ -1103,7 +1304,7 @@ int main()
 			player->breaking = false;
 		}
 		if (player->placing) {
-			player_place_block(&game_state.world.pool, &game_state.world.ogl_pool, &game_state.world.render_map, &player->pos, world->seed);
+			player_place_block(BlocktypeStone, &game_state.world.pool, &game_state.world.ogl_pool, &game_state.world.render_map, &player->pos, world->seed);
 			player->placing = false;
 		}
 		world_update(world);

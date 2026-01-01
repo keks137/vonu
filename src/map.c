@@ -48,7 +48,7 @@ bool rendermap_init(RenderMap *map, size_t table_size, size_t num_buffers)
 	return true;
 }
 
-bool rendermap_get_chunk(RenderMap *map, Chunk *chunk, ChunkCoord *key)
+bool rendermap_get_chunk(RenderMap *map, Chunk *chunk, const ChunkCoord *key)
 {
 	size_t index;
 	if (rendermap_find(map, key, &index)) {
@@ -90,7 +90,7 @@ static bool rendermap_add_opt(RenderMap *map, OGLPool *pool, Chunk *chunk, size_
 
 					// VASSERT(entry->chunk.oglpool_index == chunk->oglpool_index);
 					if (entry->chunk.oglpool_index != chunk->oglpool_index) {
-						VWARN("Replacing map's reference instead of reusing");
+						// VWARN("Replacing map's reference instead of reusing");
 						oglpool_release_chunk(pool, &entry->chunk);
 					}
 					entry->chunk = *chunk;
@@ -124,6 +124,13 @@ static bool rendermap_add_opt(RenderMap *map, OGLPool *pool, Chunk *chunk, size_
 bool rendermap_add(RenderMap *map, OGLPool *pool, Chunk *chunk)
 {
 	return rendermap_add_opt(map, pool, chunk, map->current_buffer, NULL);
+}
+void rendermap_outdate(RenderMap *map, const ChunkCoord *key)
+{
+	size_t index;
+	if (rendermap_find(map, key, &index)) {
+		map->entry[map->current_buffer][index].chunk.up_to_date = false;
+	}
 }
 
 bool rendermap_find(const RenderMap *map, const ChunkCoord *key, size_t *index)

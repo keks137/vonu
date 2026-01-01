@@ -111,7 +111,7 @@ bool disk_save(Chunk *chunk, const char *world_uid)
 	// print_chunk(chunk);
 	VASSERT(chunk != NULL);
 	VASSERT(chunk->data != NULL);
-	VASSERT(chunk->contains_blocks);
+	VASSERT(chunk->block_count > 0);
 	VASSERT(chunk->modified);
 
 	// chunk->modified = false; // NOTE: this might be a bad idea
@@ -221,6 +221,7 @@ bool disk_load(Chunk *chunk, const char *world_uid)
 
 	// TODO: not one at a time
 	size_t blocks_read = 0;
+	size_t block_count = 0;
 	for (size_t i = 0; i < CHUNK_TOTAL_BLOCKS; i++) {
 		BLOCKTYPE data = 0;
 		blocks_read += fread(&data, sizeof(data), 1, file);
@@ -228,6 +229,7 @@ bool disk_load(Chunk *chunk, const char *world_uid)
 		// TODO: proper handling of block type metadata
 		if (data == BlocktypeGrass || data == BlocktypeStone) {
 			chunk->data[i].obstructing = true;
+			block_count++;
 		}
 	}
 
@@ -245,7 +247,7 @@ bool disk_load(Chunk *chunk, const char *world_uid)
 		return false;
 	}
 
-	chunk->contains_blocks = true;
+	chunk->block_count = block_count;
 	chunk->terrain_generated = true;
 	chunk->up_to_date = false;
 	chunk->last_used = time(NULL);

@@ -6,7 +6,6 @@
 #include <stddef.h>
 #include <string.h>
 
-const uint16_t FACE_INDICES[INDICES_PER_QUAD] = { 0, 1, 2, 0, 2, 3 };
 static void vao_attributes(unsigned int VAO)
 {
 	glBindVertexArray(VAO);

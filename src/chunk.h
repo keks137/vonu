@@ -13,8 +13,8 @@
 #define CHUNK_TOTAL_Y 32
 #define CHUNK_TOTAL_Z 32
 #define CHUNK_TOTAL_BLOCKS CHUNK_TOTAL_X * CHUNK_TOTAL_Y * CHUNK_TOTAL_Z
-#define CHUNK_STRIDE_Y CHUNK_TOTAL_X
-#define CHUNK_STRIDE_Z CHUNK_TOTAL_X *CHUNK_TOTAL_Y
+#define CHUNK_STRIDE_Z CHUNK_TOTAL_X
+#define CHUNK_STRIDE_Y CHUNK_TOTAL_X *CHUNK_TOTAL_Z
 
 #define CHUNK_INDEX(x, y, z) ((x) + (y) * CHUNK_STRIDE_Y + (z) * CHUNK_STRIDE_Z)
 typedef struct {
@@ -43,12 +43,12 @@ typedef struct {
 } ChunkVertsScratch;
 
 // typedef enum {
-// 	FACE_BACK = 1 << 0,
-// 	FACE_FRONT = 1 << 1,
-// 	FACE_LEFT = 1 << 2,
-// 	FACE_RIGHT = 1 << 3,
-// 	FACE_BOTTOM = 1 << 4,
-// 	FACE_TOP = 1 << 5,
+// 	CHUNK_FACE_BACK = 1 << 0,
+// 	CHUNK_FACE_FRONT = 1 << 1,
+// 	CHUNK_FACE_LEFT = 1 << 2,
+// 	CHUNK_FACE_RIGHT = 1 << 3,
+// 	CHUNK_FACE_BOTTOM = 1 << 4,
+// 	CHUNK_FACE_TOP = 1 << 5,
 // } ChunkFace;
 
 typedef struct {
@@ -62,13 +62,15 @@ typedef struct {
 	bool has_oglpool_reference;
 	// size_t vertex_count;
 	size_t face_count;
-	bool contains_blocks;
+	size_t block_count;
 	bool up_to_date;
 	bool terrain_generated;
 	bool modified;
 	bool has_vbo_data;
+	// ChunkFace probably_nonempty_faces;
 	uint64_t updates_this_cycle;
 	uint64_t cycles_since_update;
+	uint64_t cycles_since_read;
 	uint64_t unchanged_render_count;
 	time_t last_used;
 } Chunk;
@@ -76,13 +78,14 @@ typedef struct {
 void print_chunk(Chunk *chunk);
 void chunk_free(Chunk *chunk);
 void chunk_load(Chunk *chunk, const ChunkCoord *coord, size_t seed);
-void chunk_generate_mesh(OGLPool *pool, Chunk *chunk, ChunkVertsScratch *tmp_chunk_verts);
 void chunk_clear_metadata(Chunk *chunk);
 void clear_chunk_verts_scratch(ChunkVertsScratch *tmp_chunk_verts);
 ChunkCoord world_coord_to_chunk(const WorldCoord *world);
 void world_cord_to_chunk_and_block(const WorldCoord *world, ChunkCoord *chunk, BlockPos *local);
+void blockpos_to_world_coord(const BlockPos *local, const ChunkCoord *chunk, WorldCoord *world);
 // Block *chunk_blockpos_at(const Chunk *chunk, const BlockPos *pos);
-Block *chunk_xyz_at(const Chunk *chunk, int x, int y, int z);
+// Block *chunk_xyz_at(const Chunk *chunk, int x, int y, int z);
+void chunk_generate_terrain(Chunk *chunk, size_t seed);
 
 // avoid circular
 bool oglpool_claim_chunk(OGLPool *pool, Chunk *chunk);

@@ -1,21 +1,21 @@
 #include "pool.h"
+#include "chunk.h"
 #include "logs.h"
 #include "vassert.h"
+#include <stddef.h>
 #include <string.h>
-void pool_reserve(ChunkPool *pool, size_t num)
+void pool_reserve(ChunkPool *pool)
 {
-	VASSERT(pool->lvl + num <= pool->cap);
-	pool->blockdata = realloc(pool->blockdata, sizeof(Block) * (pool->lvl + num) * CHUNK_TOTAL_BLOCKS);
+	pool->blockdata = realloc(pool->blockdata, sizeof(Block) * (pool->cap) * CHUNK_TOTAL_BLOCKS);
 	VASSERT_MSG(pool->blockdata != NULL, "Buy more ram bozo");
 	Block *start_new_blocks = pool->blockdata + sizeof(Block) * CHUNK_TOTAL_BLOCKS * pool->lvl;
-	memset(start_new_blocks, 0, num * sizeof(Block) * CHUNK_TOTAL_BLOCKS);
+	memset(start_new_blocks, 0, pool->cap * sizeof(Block) * CHUNK_TOTAL_BLOCKS);
 
-	for (size_t i = 0; i < num; i++) {
+	for (size_t i = 0; i < pool->cap; i++) {
 		Chunk chunk = { 0 };
 		chunk.data = start_new_blocks + i * CHUNK_TOTAL_BLOCKS;
 		pool->chunk[pool->lvl + i] = chunk;
 	}
-	pool->lvl += num;
 }
 size_t pool_append(ChunkPool *pool, const ChunkCoord *coord, size_t seed)
 {
@@ -111,6 +111,13 @@ bool pool_add_keep_ogl(ChunkPool *pool, size_t *index, OGLPool *ogl, size_t ogl_
 		return true;
 	}
 }
+void pool_load_chunk(ChunkPool *pool, OGLPool *ogl, RenderMap *map, const ChunkCoord *pos, Chunk **chunk, size_t seed)
+{
+	size_t index;
+	VASSERT(pool_load(pool, ogl, map, &index, pos, seed));
+	*chunk = &pool->chunk[index];
+	VASSERT(chunk != NULL);
+}
 void pool_update_chunk(ChunkPool *pool, OGLPool *ogl, RenderMap *map, const ChunkCoord *pos, Chunk **chunk, size_t seed)
 {
 	size_t index;
@@ -121,6 +128,14 @@ void pool_update_chunk(ChunkPool *pool, OGLPool *ogl, RenderMap *map, const Chun
 	(*chunk)->modified = true;
 	(*chunk)->updates_this_cycle++;
 	(*chunk)->cycles_since_update = 0;
+}
+
+void pool_read_chunk(ChunkPool *pool, OGLPool *ogl, RenderMap *map, const ChunkCoord *pos, Chunk **chunk, size_t seed)
+{
+	size_t index;
+	VASSERT(pool_load(pool, ogl, map, &index, pos, seed));
+	*chunk = &pool->chunk[index];
+	VASSERT(chunk != NULL);
 }
 
 void print_pool(ChunkPool *pool)
@@ -135,27 +150,60 @@ void print_pool(ChunkPool *pool)
 	}
 #endif
 }
-static inline Block *chunk_blockpos_at(const Chunk *chunk, const BlockPos *pos)
+static inline Block chunk_read_block(const Chunk *chunk, const BlockPos *pos)
 {
-	VASSERT(pos->x < CHUNK_TOTAL_X &&
-		pos->y < CHUNK_TOTAL_Y &&
-		pos->z < CHUNK_TOTAL_Z);
-
-	return &chunk->data[CHUNK_INDEX(pos->x, pos->y, pos->z)];
+	return chunk->data[CHUNK_INDEX(pos->x, pos->y, pos->z)];
 }
 
-void pool_update_block(ChunkPool *pool, OGLPool *ogl, RenderMap *map, const WorldCoord *pos, Block **block, size_t seed, bool now_contains_blocks)
+// NOTE: don't rawdog this function, it doesn't track chunk->block_count
+static inline Block chunk_replace_block(Chunk *chunk, BlockPos *pos, Block block)
+{
+	Block *chnkblock = &chunk->data[CHUNK_INDEX(pos->x, pos->y, pos->z)];
+	Block ret = *chnkblock;
+	*chnkblock = block;
+	return ret;
+}
+
+Block pool_read_block(ChunkPool *pool, OGLPool *ogl, RenderMap *map, const WorldCoord *pos, size_t seed)
 {
 	ChunkCoord chunk_pos = { 0 };
 	BlockPos block_pos = { 0 };
 	world_cord_to_chunk_and_block(pos, &chunk_pos, &block_pos);
 	Chunk *chunk = NULL;
-	pool_update_chunk(pool, ogl, map, &chunk_pos, &chunk, seed);
+	pool_load_chunk(pool, ogl, map, &chunk_pos, &chunk, seed);
 	VASSERT(chunk != NULL);
 	VASSERT(chunk->data != NULL);
-	*block = chunk_blockpos_at(chunk, &block_pos);
-	if (now_contains_blocks)
-		chunk->contains_blocks = true;
+	VASSERT(block_pos.x >= 0 && block_pos.x < CHUNK_TOTAL_X &&
+		block_pos.z >= 0 && block_pos.z < CHUNK_TOTAL_Z &&
+		block_pos.y >= 0 && block_pos.y < CHUNK_TOTAL_Y);
+	Block ret = chunk_read_block(chunk, &block_pos);
+	return ret;
+}
+void pool_replace_block(ChunkPool *pool, OGLPool *ogl, RenderMap *map, const WorldCoord *pos, Block block, size_t seed)
+{
+	ChunkCoord chunk_pos = { 0 };
+	BlockPos block_pos = { 0 };
+	world_cord_to_chunk_and_block(pos, &chunk_pos, &block_pos);
+	Chunk *chunk = NULL;
+	pool_load_chunk(pool, ogl, map, &chunk_pos, &chunk, seed);
+	VASSERT(chunk != NULL);
+	VASSERT(chunk->data != NULL);
+	VASSERT(block_pos.x >= 0 && block_pos.x < CHUNK_TOTAL_X &&
+		block_pos.z >= 0 && block_pos.z < CHUNK_TOTAL_Z &&
+		block_pos.y >= 0 && block_pos.y < CHUNK_TOTAL_Y);
+
+	Block prevblock = chunk_replace_block(chunk, &block_pos, block);
+	if (block.type != prevblock.type) {
+		chunk->up_to_date = false;
+		chunk->modified = true;
+		chunk->updates_this_cycle++;
+		chunk->cycles_since_update = 0;
+		VINFO("hi");
+		if (prevblock.type == BlocktypeAir) {
+			VINFO("superhi");
+			chunk->block_count++;
+		}
+	}
 }
 
 bool pool_add(ChunkPool *pool, size_t *index, const ChunkCoord *coord, size_t seed)
@@ -178,7 +226,7 @@ void pool_empty(ChunkPool *pool, OGLPool *ogl, size_t index)
 {
 	VASSERT(pool->lvl > index);
 	// TODO: store completely empty chunks somewhere else, since they don't need a VBO anyways
-	VASSERT_MSG(pool->chunk[index].up_to_date || !pool->chunk[index].contains_blocks, "There was no reason to unload this");
+	// VASSERT_MSG(pool->chunk[index].up_to_date || pool->chunk[index].block_count == 0, "There was no reason to unload this");
 	Chunk *chunk = &pool->chunk[index];
 	if (chunk->has_oglpool_reference)
 		oglpool_release_chunk(ogl, chunk);

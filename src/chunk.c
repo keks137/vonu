@@ -19,20 +19,9 @@ BlockPos chunk_index_to_blockpos(size_t index)
 	BlockPos pos = { 0 };
 	pos.x = index % CHUNK_TOTAL_X;
 	index /= CHUNK_TOTAL_X;
-	pos.y = index % CHUNK_TOTAL_Y;
-	pos.z = index / CHUNK_TOTAL_Y;
+	pos.z = index % CHUNK_TOTAL_Z;
+	pos.y = index / CHUNK_TOTAL_Z;
 	return pos;
-}
-
-Block *chunk_xyz_at(const Chunk *chunk, int x, int y, int z)
-{
-	if (x < 0 || x >= CHUNK_TOTAL_X ||
-	    y < 0 || y >= CHUNK_TOTAL_Y ||
-	    z < 0 || z >= CHUNK_TOTAL_Z) {
-		return NULL;
-	}
-
-	return &chunk->data[CHUNK_INDEX(x, y, z)];
 }
 
 ChunkCoord world_coord_to_chunk(const WorldCoord *world)
@@ -54,6 +43,12 @@ void world_cord_to_chunk_and_block(const WorldCoord *world, ChunkCoord *chunk, B
 	local->y = ((world->y % CHUNK_TOTAL_Y) + CHUNK_TOTAL_Y) % CHUNK_TOTAL_Y;
 	local->z = ((world->z % CHUNK_TOTAL_Z) + CHUNK_TOTAL_Z) % CHUNK_TOTAL_Z;
 }
+void blockpos_to_world_coord(const BlockPos *local, const ChunkCoord *chunk, WorldCoord *world)
+{
+	world->x = chunk->x * CHUNK_TOTAL_X + local->x;
+	world->y = chunk->y * CHUNK_TOTAL_Y + local->y;
+	world->z = chunk->z * CHUNK_TOTAL_Z + local->z;
+}
 void print_chunk(Chunk *chunk)
 {
 	VINFO("Chunk: %p", chunk);
@@ -62,7 +57,7 @@ void print_chunk(Chunk *chunk)
 	VINFO("unchanged_render_count: %i", chunk->unchanged_render_count);
 	VINFO("up_to_date: %s", chunk->up_to_date ? "true" : "false");
 	VINFO("terrain_generated: %s", chunk->terrain_generated ? "true" : "false");
-	VINFO("contains_blocks: %s", chunk->contains_blocks ? "true" : "false");
+	VINFO("block_count: %i", chunk->block_count);
 	VINFO("face_count: %i", chunk->face_count);
 	VINFO("cycles_since_update: %i", chunk->cycles_since_update);
 	VINFO("has_oglpool_reference: %s", chunk->has_oglpool_reference ? "true" : "false");
@@ -79,15 +74,15 @@ void chunk_generate_terrain(Chunk *chunk, size_t seed)
 	VASSERT(chunk->data != NULL);
 	// VINFO("Generating terrain: %i %i %i", chunk->coord.x, chunk->coord.y, chunk->coord.z);
 
-	srand(seed);
-	if (chunk->coord.y == 0) {
-		for (size_t z = 0; z < CHUNK_TOTAL_Z; z++) {
-			for (size_t y = 0; y < CHUNK_TOTAL_Y; y++) {
-				size_t y_lim = 1 + rand() % 20;
+	// srand(seed);
+	if (chunk->coord.y == 0 || chunk->coord.y == 4) {
+		for (size_t y = 0; y < CHUNK_TOTAL_Y; y++) {
+			for (size_t z = 0; z < CHUNK_TOTAL_Z; z++) {
+				// size_t y_lim = 1 + rand() % 20;
 				for (size_t x = 0; x < CHUNK_TOTAL_X; x++) {
-					if (y < y_lim) {
+					if (y < 6) {
 						Block *block = &chunk->data[CHUNK_INDEX(x, y, z)];
-						chunk->contains_blocks = true;
+						chunk->block_count++;
 						block->type = BlocktypeGrass;
 						block->obstructing = true;
 						// block_make_light(block, (Color){ 255, 255, 255, 0 }, 15); // TODO:make proper light propagation and remove

@@ -29,11 +29,12 @@ typedef struct {
 } RenderMap;
 
 bool rendermap_init(RenderMap *map, size_t table_size, size_t num_buffers);
-bool rendermap_get_chunk(RenderMap *map, Chunk *chunk, ChunkCoord *key);
 bool rendermap_add_next_buffer(RenderMap *map, OGLPool *pool, Chunk *chunk);
 void rendermap_advance_buffer(RenderMap *map, OGLPool *pool);
 bool rendermap_add(RenderMap *map, OGLPool *pool, Chunk *chunk);
 bool rendermap_find(const RenderMap *map, const ChunkCoord *key, size_t *index);
+bool rendermap_get_chunk(RenderMap *map, Chunk *chunk,const ChunkCoord *key);
 bool rendermap_remove(RenderMap *map, OGLPool *pool, ChunkCoord *key);
+void rendermap_outdate(RenderMap *map, const ChunkCoord *key);
 
 #endif // INCLUDE_SRC_MAP_H_
