@@ -619,7 +619,7 @@ void world_init(World *world)
 
 	oglpool_init(&world->ogl_pool, MAX_VISIBLE_CHUNKS * 2);
 	rendermap_init(&world->render_map, 2 * 2048, 2);
-	meshqueue_init(&world->mesh, 2048);
+	meshqueue_init(&world->mesh, 1024, 1024);
 
 	pool_reserve(&world->pool);
 
@@ -697,10 +697,10 @@ typedef struct {
 	int height;
 } WindowData;
 
-void print_meshqueue(MeshQueue *mesh)
-{
-	VINFO("Amount :%i", (mesh->writei) - (mesh->readi));
-}
+// void print_meshqueue(MeshQueue *mesh)
+// {
+// 	VINFO("Amount :%i", (mesh->writei) - (mesh->readi));
+// }
 
 void world_render(World *world, ChunkVertsScratch *tmp_chunk_verts, ShaderData shader_data)
 {
@@ -857,13 +857,15 @@ static inline Block chunk_blockpos_at(const Chunk *chunk, const BlockPos *pos)
 #define MESH_INVOLVED_CENTRE 14
 #define MESH_INVOLVED_STRIDE_Y 9
 #define MESH_INVOLVED_STRIDE_Z 3
-void meshqueue_init(MeshQueue *mesh, size_t cap)
+void meshqueue_init(MeshQueue *mesh, size_t up_cap, size_t new_cap)
 {
-	VASSERT(is_power_of_two(cap));
-	const size_t chunks_involved = 27; // for the chunk itself and the 8 surrounding
-	mesh->mask = cap - 1;
-	mesh->chunks = calloc(cap, sizeof(mesh->chunks[0]));
-	VASSERT_RELEASE_MSG(mesh->chunks != NULL, "Buy more RAM");
+	VASSERT(is_power_of_two(up_cap));
+	VASSERT(is_power_of_two(new_cap));
+	mesh->up.mask = up_cap - 1;
+	mesh->up.chunks = calloc(up_cap, sizeof(mesh->up.chunks[0]));
+	VASSERT_RELEASE_MSG(mesh->up.chunks != NULL, "Buy more RAM");
+	mesh->new.chunks = calloc(new_cap, sizeof(mesh->new.chunks[0]));
+	VASSERT_RELEASE_MSG(mesh->new.chunks != NULL, "Buy more RAM");
 	mesh->blockdata = calloc(MESH_CHUNKS_INVOLVED * CHUNK_TOTAL_BLOCKS, sizeof(mesh->blockdata[0]));
 	VASSERT_RELEASE_MSG(mesh->blockdata != NULL, "Buy more RAM");
 	mesh->involved = calloc(MESH_CHUNKS_INVOLVED * CHUNK_TOTAL_BLOCKS, sizeof(mesh->involved[0]));
@@ -876,21 +878,51 @@ void meshqueue_init(MeshQueue *mesh, size_t cap)
 	}
 }
 
-void meshqueue_add(MeshQueue *mesh, const ChunkCoord coord)
+void meshqueue_add_update(MeshQueue *mesh, const ChunkCoord coord)
 {
-	if (mesh->writei - mesh->readi > mesh->mask)
-		mesh->readi = mesh->writei - mesh->mask;
+	if (mesh->up.writei - mesh->up.readi > mesh->up.mask)
 
-	mesh->chunks[mesh->writei & mesh->mask] = coord;
-	mesh->writei++;
+		mesh->up.readi = mesh->up.writei - mesh->up.mask;
+
+	mesh->up.chunks[mesh->up.writei & mesh->up.mask] = coord;
+	mesh->up.writei++;
 }
+
+void meshqueue_add_new(MeshQueue *mesh, const ChunkCoord coord)
+{
+	if (mesh->new.writei - mesh->new.readi > mesh->new.mask)
+		mesh->new.readi = mesh->new.writei - mesh->new.mask;
+
+	mesh->new.chunks[mesh->new.writei & mesh->new.mask] = coord;
+	mesh->new.writei++;
+}
+
+bool meshqueue_get_up(MeshQueue *mesh, ChunkCoord *coord)
+{
+	if (mesh->up.readi == mesh->up.writei)
+		return false;
+	*coord = mesh->up.chunks[mesh->up.readi & mesh->up.mask];
+	mesh->up.readi++;
+	return true;
+}
+
+bool meshqueue_get_new(MeshQueue *mesh, ChunkCoord *coord)
+{
+	if (mesh->new.readi == mesh->new.writei)
+		return false;
+	*coord = mesh->new.chunks[mesh->new.readi & mesh->new.mask];
+	mesh->new.readi++;
+	return true;
+}
+
 bool meshqueue_get(MeshQueue *mesh, ChunkCoord *coord)
 {
-	if (mesh->readi == mesh->writei)
-		return false;
-	*coord = mesh->chunks[mesh->readi & mesh->mask];
-	mesh->readi++;
-	return true;
+	if (meshqueue_get_up(mesh, coord))
+		return true;
+	if (meshqueue_get_new(mesh, coord))
+		return true;
+
+	return false;
 }
 void mesh_request(RenderMap *map, MeshQueue *mesh, const ChunkCoord *coord)
 {
@@ -900,8 +932,10 @@ void mesh_request(RenderMap *map, MeshQueue *mesh, const ChunkCoord *coord)
 		// print_chunk(&chunk);
 		if (chunk.up_to_date || chunk.block_count == 0)
 			return;
+		meshqueue_add_update(mesh, *coord);
+		return;
 	}
-	meshqueue_add(mesh, *coord);
+	meshqueue_add_new(mesh, *coord);
 }
 
 void mesh_add_face(ChunkVertsScratch *buffer, const BlockPos *pos, BLOCKTYPE type, CubeFace face, BlockLight light)
@@ -1097,7 +1131,7 @@ void world_update(World *world)
 
 		// if (world->pool.chunk[i].up_to_date) {
 		if (chunk->updates_this_cycle > 0) {
-			VINFO("bye");
+			// VINFO("bye");
 			rendermap_outdate(&world->render_map, &chunk->coord);
 			chunk->cycles_since_update++;
 			chunk->updates_this_cycle = 0;

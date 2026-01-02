@@ -198,9 +198,9 @@ void pool_replace_block(ChunkPool *pool, OGLPool *ogl, RenderMap *map, const Wor
 		chunk->modified = true;
 		chunk->updates_this_cycle++;
 		chunk->cycles_since_update = 0;
-		VINFO("hi");
+		// VINFO("hi");
 		if (prevblock.type == BlocktypeAir) {
-			VINFO("superhi");
+			// VINFO("superhi");
 			chunk->block_count++;
 		}
 	}
