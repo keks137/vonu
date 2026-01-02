@@ -24,6 +24,7 @@
 #include "shaders/vert2.c"
 #include "shaders/frag2.c"
 
+#define MAX(expr1, expr2) ((expr1) > (expr2) ? (expr1) : (expr2))
 const char *BlockTypeString[] = {
 #define X(name) #name,
 	BLOCKTYPE_NAMES
@@ -52,6 +53,21 @@ typedef struct {
 	float pitch;
 	float fov;
 } Camera;
+
+size_t get_max_threads()
+{
+	size_t num_threads = 1;
+
+#ifdef _WIN32
+	SYSTEM_INFO sysinfo;
+	GetSystemInfo(&sysinfo);
+	num_threads = sysinfo.dwNumberOfProcessors;
+
+#elif defined(_SC_NPROCESSORS_ONLN)
+	num_threads = sysconf(_SC_NPROCESSORS_ONLN);
+#endif // _WIN32
+	return num_threads;
+}
 
 static inline bool is_power_of_two(size_t n)
 {
@@ -670,8 +686,8 @@ void rendermap_keep_only_in_range(RenderMap *map, OGLPool *pool)
 		if (rendermap_get_chunk(map, &chunk, &(ChunkCoord){ it.coord.x, it.coord.y, it.coord.z })) {
 			rendermap_add_next_buffer(map, pool, &chunk);
 		}
-		rendermap_advance_buffer(map, pool);
 	} while (next_chunk(&it));
+	rendermap_advance_buffer(map, pool);
 }
 
 void rendermap_clean_maybe(RenderMap *map, OGLPool *pool)
@@ -689,6 +705,8 @@ void player_update(Player *player)
 	player->pos.x = floorf(player->camera.pos[0]);
 	player->pos.y = floorf(player->camera.pos[1]) - 1;
 	player->pos.z = floorf(player->camera.pos[2]);
+	ChunkCoord new_chunk = world_coord_to_chunk(&player->pos);
+	player->chunk_pos = new_chunk;
 }
 
 typedef struct {
@@ -707,7 +725,8 @@ void world_render(World *world, ChunkVertsScratch *tmp_chunk_verts, ShaderData s
 	time_t current_time = time(NULL);
 	// if ((world->mesh.writei - world->mesh.readi) != 0)
 	// 	print_meshqueue(&world->mesh);
-	meshqueue_process(&world->mesh, &world->pool, &world->render_map, &world->ogl_pool, tmp_chunk_verts, world->seed);
+	// print_pool(&world->pool);
+	meshqueue_process(1024, &world->mesh, &world->pool, &world->render_map, &world->ogl_pool, tmp_chunk_verts, world->seed);
 
 	for (int z = -RENDER_DISTANCE_Z; z <= RENDER_DISTANCE_Z; z++) {
 		for (int y = -RENDER_DISTANCE_Y; y <= RENDER_DISTANCE_Y; y++) {
@@ -766,12 +785,14 @@ void player_break_block(ChunkPool *pool, OGLPool *ogl, RenderMap *map, const Wor
 	Block block = { 0 };
 	pool_replace_block(pool, ogl, map, pos, block, seed);
 }
-void player_place_block(BLOCKTYPE blocktype, ChunkPool *pool, OGLPool *ogl, RenderMap *map, const WorldCoord *pos, size_t seed)
+void player_place_block(Player *player, BLOCKTYPE blocktype, ChunkPool *pool, OGLPool *ogl, RenderMap *map, const WorldCoord *pos, size_t seed)
 {
 	// TODO: check if player is actually allowed to
 	Block block = blocktype_to_block(blocktype);
 
 	pool_replace_block(pool, ogl, map, pos, block, seed);
+	// pool_replace_block(pool, ogl, map, &(WorldCoord){ 0, -10, 0 }, block, seed);
+	// player_print_block(player, ogl, map, pool, seed);
 }
 
 /*
@@ -927,10 +948,10 @@ bool meshqueue_get(MeshQueue *mesh, ChunkCoord *coord)
 void mesh_request(RenderMap *map, MeshQueue *mesh, const ChunkCoord *coord)
 {
 	Chunk chunk = { 0 };
-	// TODO: two queues, priority for modifications, new loads after
+	// TODO: check for updated chunks
 	if (rendermap_get_chunk(map, &chunk, coord)) {
 		// print_chunk(&chunk);
-		if (chunk.up_to_date || chunk.block_count == 0)
+		if (chunk.up_to_date)
 			return;
 		meshqueue_add_update(mesh, *coord);
 		return;
@@ -991,9 +1012,13 @@ static inline Block meshqueue_block_at(MeshQueue *mesh, BlockPos *pos)
 
 	size_t chunk_index = (cy + 1) * MESH_INVOLVED_STRIDE_Y + (cz + 1) * MESH_INVOLVED_STRIDE_Z + (cx + 1);
 
-	int32_t lx = pos->x - cx * CHUNK_TOTAL_X;
-	int32_t ly = pos->y - cy * CHUNK_TOTAL_Y;
-	int32_t lz = pos->z - cz * CHUNK_TOTAL_Z;
+	int64_t lx = pos->x - cx * CHUNK_TOTAL_X;
+	int64_t ly = pos->y - cy * CHUNK_TOTAL_Y;
+	int64_t lz = pos->z - cz * CHUNK_TOTAL_Z;
+
+	VASSERT((lx >= 0 && lx < CHUNK_TOTAL_X &&
+		 ly >= 0 && ly < CHUNK_TOTAL_Y &&
+		 lz >= 0 && lz < CHUNK_TOTAL_Z));
 
 	size_t block_index_in_chunk = (ly * CHUNK_TOTAL_X + lz) * CHUNK_TOTAL_X + lx;
 
@@ -1056,11 +1081,16 @@ void meshqueue_chunk_load(ChunkPool *pool, Chunk *chunk, const ChunkCoord *coord
 void mesh_compute(MeshQueue *mesh, ChunkPool *pool, ChunkVertsScratch *scratch, const ChunkCoord *coord, size_t seed)
 {
 	Chunk *wanted = &mesh->involved[MESH_INVOLVED_CENTRE];
+	VASSERT(wanted->block_count > 0);
 	size_t i = 0;
-	memset(mesh->blockdata, 0, sizeof(Block) * CHUNK_TOTAL_BLOCKS * MESH_CHUNKS_INVOLVED);
 	for (int64_t y = coord->y - 1; y <= coord->y + 1; y++)
 		for (int64_t z = coord->z - 1; z <= coord->z + 1; z++)
 			for (int64_t x = coord->x - 1; x <= coord->x + 1; x++) {
+				if (i == MESH_INVOLVED_CENTRE) { // already loaded
+					i++;
+					continue;
+				}
+				memset(mesh->involved[i].data, 0, sizeof(Block) * CHUNK_TOTAL_BLOCKS);
 				chunk_clear_metadata(&mesh->involved[i]);
 				meshqueue_chunk_load(pool, &mesh->involved[i], coord, seed);
 				i++;
@@ -1083,6 +1113,7 @@ void mesh_upload_chunk(OGLPool *ogl, ChunkVertsScratch *scratch, Chunk *chunk)
 {
 	chunk->face_count = scratch->lvl / VERTICES_PER_QUAD;
 
+	VASSERT_WARN(chunk->face_count > 0);
 	if (chunk->face_count == 0) {
 		return;
 	}
@@ -1103,32 +1134,50 @@ void mesh_upload_chunk(OGLPool *ogl, ChunkVertsScratch *scratch, Chunk *chunk)
 		     scratch->data,
 		     chunk->updates_this_cycle > 2 ? GL_DYNAMIC_DRAW : GL_STATIC_DRAW);
 	chunk->has_vbo_data = true;
-	chunk->up_to_date = true;
 }
-void meshqueue_process(MeshQueue *mesh, ChunkPool *pool, RenderMap *map, OGLPool *ogl, ChunkVertsScratch *scratch, size_t seed)
+static inline void meshqueue_process_element(ChunkCoord *coord, MeshQueue *mesh, ChunkPool *pool, RenderMap *map, OGLPool *ogl, ChunkVertsScratch *scratch, size_t seed)
+{
+	Chunk *wanted = &mesh->involved[MESH_INVOLVED_CENTRE];
+	memset(wanted->data, 0, sizeof(Block) * CHUNK_TOTAL_BLOCKS);
+	chunk_clear_metadata(wanted);
+	meshqueue_chunk_load(pool, wanted, coord, seed);
+	wanted->up_to_date = true;
+	if (wanted->block_count > 0) {
+		clear_chunk_verts_scratch(scratch);
+		mesh_compute(mesh, pool, scratch, coord, seed);
+
+		mesh_upload_chunk(ogl, scratch, wanted);
+		rendermap_add(map, ogl, wanted);
+	} else
+		rendermap_add(map, ogl, wanted);
+
+	if (wanted->has_oglpool_reference)
+		oglpool_release_chunk(ogl, wanted);
+}
+void meshqueue_process(size_t max, MeshQueue *mesh, ChunkPool *pool, RenderMap *map, OGLPool *ogl, ChunkVertsScratch *scratch, size_t seed)
 {
 	ChunkCoord coord = { 0 };
-	Chunk *wanted = &mesh->involved[MESH_INVOLVED_CENTRE];
 
-	for (size_t i = 0; i < 512; i++)
-		if (meshqueue_get(mesh, &coord)) {
-			clear_chunk_verts_scratch(scratch);
-			mesh_compute(mesh, pool, scratch, &coord, seed);
-			mesh_upload_chunk(ogl, scratch, wanted);
-			// add to map and set up-to-date = true
-			rendermap_add(map, ogl, wanted);
-			if (wanted->has_oglpool_reference)
-				oglpool_release_chunk(ogl, wanted);
-		}
+	size_t processed = 0;
+	while (processed < max && meshqueue_get_up(mesh, &coord)) {
+		meshqueue_process_element(&coord, mesh, pool, map, ogl, scratch, seed);
+		processed++;
+	}
+	// for (size_t i = 0; i < 2038; i++) {
+	while (processed < max && meshqueue_get_new(mesh, &coord)) {
+		meshqueue_process_element(&coord, mesh, pool, map, ogl, scratch, seed);
+		processed++;
+	}
 }
 
 void world_update(World *world)
 {
 	rendermap_clean_maybe(&world->render_map, &world->ogl_pool);
+	// VINFO("c: %i", world->render_map.count);
+	// VINFO("d: %i", world->render_map.deleted_count);
 
 	for (size_t i = 0; i < world->pool.lvl; i++) {
 		Chunk *chunk = &world->pool.chunk[i];
-
 		// if (world->pool.chunk[i].up_to_date) {
 		if (chunk->updates_this_cycle > 0) {
 			// VINFO("bye");
@@ -1137,23 +1186,21 @@ void world_update(World *world)
 			chunk->updates_this_cycle = 0;
 		}
 
-		if (chunk->cycles_since_read > 400) {
+		if (chunk->cycles_in_pool > 400) {
 			if (chunk->modified)
 				disk_save(chunk, world->uid);
 			pool_empty(&world->pool, &world->ogl_pool, i);
 		}
-		chunk->cycles_since_read++;
+		chunk->cycles_in_pool++;
 	}
 
 	// if (world->pool.lvl < world->pool.cap) {
 	// TODO: something better (or separate thread)
-	ChunkCoord new_chunk = world_coord_to_chunk(&world->player.pos);
 	// if (new_chunk.x != world->player.chunk_pos.x ||
 	//     new_chunk.y != world->player.chunk_pos.y ||
 	//     new_chunk.z != world->player.chunk_pos.z) {
-	world->player.chunk_pos = new_chunk;
-	for (int z = -RENDER_DISTANCE_Z; z <= RENDER_DISTANCE_Z; z++) {
-		for (int y = -RENDER_DISTANCE_Y; y <= RENDER_DISTANCE_Y; y++) {
+	for (int y = RENDER_DISTANCE_Y; y > -RENDER_DISTANCE_Y; y--) {
+		for (int z = -RENDER_DISTANCE_Z; z <= RENDER_DISTANCE_Z; z++) {
 			for (int x = -RENDER_DISTANCE_X; x <= RENDER_DISTANCE_X; x++) {
 				ChunkCoord coord = {
 					world->player.chunk_pos.x + x,
@@ -1167,6 +1214,31 @@ void world_update(World *world)
 			}
 		}
 	}
+	// for (int32_t radius = 0; radius <= MAX(RENDER_DISTANCE_X, MAX(RENDER_DISTANCE_Y, RENDER_DISTANCE_Z)); radius++) {
+	// 	for (int32_t x = -radius; x <= radius; x++) {
+	// 		for (int32_t y = -radius; y <= radius; y++) {
+	// 			for (int32_t z = -radius; z <= radius; z++) {
+	// 				// Only process if exactly at this radius (on the shell)
+	// 				if (abs(x) != radius && abs(y) != radius && abs(z) != radius)
+	// 					continue;
+	//
+	// 				// Check if within render distance
+	// 				if (abs(x) > RENDER_DISTANCE_X ||
+	// 				    abs(y) > RENDER_DISTANCE_Y ||
+	// 				    abs(z) > RENDER_DISTANCE_Z)
+	// 					continue;
+	//
+	// 				ChunkCoord coord = {
+	// 					world->player.chunk_pos.x + x,
+	// 					world->player.chunk_pos.y + y,
+	// 					world->player.chunk_pos.z + z
+	// 				};
+	//
+	// 				mesh_request(&world->render_map, &world->mesh, &coord);
+	// 			}
+	// 		}
+	// 	}
+	// }
 	// }
 }
 void render(GameState *game_state, WindowData window, ShaderData shader_data, ChunkVertsScratch tmp_chunk_verts)
@@ -1315,6 +1387,7 @@ int main()
 
 	// BlockLight light = color_and_range_to_blocklight((Color){ 255, 255, 0, 1 }, 15);
 	// print_blocklight(light);
+	VINFO("%i", get_max_threads());
 
 	Player *player = &world->player;
 	while (!glfwWindowShouldClose(window.glfw)) {
@@ -1338,7 +1411,7 @@ int main()
 			player->breaking = false;
 		}
 		if (player->placing) {
-			player_place_block(BlocktypeStone, &game_state.world.pool, &game_state.world.ogl_pool, &game_state.world.render_map, &player->pos, world->seed);
+			player_place_block(player, BlocktypeStone, &game_state.world.pool, &game_state.world.ogl_pool, &game_state.world.render_map, &player->pos, world->seed);
 			player->placing = false;
 		}
 		world_update(world);

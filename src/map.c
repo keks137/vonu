@@ -205,6 +205,7 @@ void rendermap_advance_buffer(RenderMap *map, OGLPool *pool)
 		}
 	}
 
+	VWARN("RenderMap advanced");
 	memset(map, 0, sizeof(*map));
 	map->entry = tmp.entry;
 	map->table_size = tmp.table_size;

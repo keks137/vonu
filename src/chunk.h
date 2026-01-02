@@ -70,7 +70,7 @@ typedef struct {
 	// ChunkFace probably_nonempty_faces;
 	uint64_t updates_this_cycle;
 	uint64_t cycles_since_update;
-	uint64_t cycles_since_read;
+	uint64_t cycles_in_pool;
 	uint64_t unchanged_render_count;
 	time_t last_used;
 } Chunk;

@@ -75,7 +75,7 @@ void chunk_generate_terrain(Chunk *chunk, size_t seed)
 	// VINFO("Generating terrain: %i %i %i", chunk->coord.x, chunk->coord.y, chunk->coord.z);
 
 	// srand(seed);
-	if (chunk->coord.y == 0 || chunk->coord.y == 4) {
+	if (chunk->coord.y == 0)
 		for (size_t y = 0; y < CHUNK_TOTAL_Y; y++) {
 			for (size_t z = 0; z < CHUNK_TOTAL_Z; z++) {
 				// size_t y_lim = 1 + rand() % 20;
@@ -90,9 +90,10 @@ void chunk_generate_terrain(Chunk *chunk, size_t seed)
 				}
 			}
 		}
-		// VINFO("Generated:");
-		// print_block(&chunk->data[0]);
-	}
+
+	// VINFO("Generated:");
+	// print_block(&chunk->data[0]);
+
 	chunk->terrain_generated = true;
 }
 

@@ -29,6 +29,7 @@ void linux_glfw_flags(Nob_Cmd *cmd)
 	nob_cmd_append(cmd, "-ggdb");
 	// nob_cmd_append(cmd, "-std=c99");
 	// nob_cmd_append(cmd, "-O2");
+	// nob_cmd_append(cmd, "-O3");
 	// nob_cmd_append(cmd, "-fsanitize=address,undefined"); // soo useful
 	nob_cmd_append(cmd, "-DPLATFORM_DESKTOP");
 	nob_cmd_append(cmd, "-D_GLFW_X11");
