@@ -40,7 +40,7 @@ typedef struct {
 } BlockPos;
 
 
-BlockLight color_and_range_to_blocklight(Color color, uint8_t range);
-void block_make_light(Block *block, Color color, uint8_t range);
+BlockLight color_to_blocklight(Color color);
+void block_make_light(Block *block, Color color);
 
 #endif  // INCLUDE_SRC_BLOCK_H_

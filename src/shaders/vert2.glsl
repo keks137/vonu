@@ -34,11 +34,11 @@ void main()
 	vec3 aNormal = NORMALS[aFaceIndex];
 	// Normal = mat3(transpose(inverse(model))) * aNormal;
 	Normal = aNormal;
-	uint r = (aLight >> 8) & 0xFFu;
-	uint g = (aLight >> 16) & 0xFFu;
-	uint b = (aLight >> 24) & 0xFFu;
+	uint r = (aLight) & 0xFu;
+	uint g = (aLight >> 4) & 0xFu;
+	uint b = (aLight >> 8) & 0xFu;
 
 	LightLevel = (aLight & 0xFu) / 15.0;
 
-	LightColor = vec3(float(r) / 255.0, float(g) / 255.0, float(b) / 255.0);
+	LightColor = vec3(float(r) / 16.0, float(g) / 16.0, float(b) / 16.0);
 }

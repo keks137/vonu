@@ -5,7 +5,6 @@ in vec2 TexCoord;
 in vec3 Normal;
 in vec3 FragPos;
 in vec3 LightColor; 
-in float LightLevel;
 
 
 uniform sampler2D texture1;
@@ -35,8 +34,9 @@ void main()
 
 
 
-	float brightness = LightLevel;
-	float totalLight = brightness * faceLight;
+	// float brightness = LightLevel;
+	// float totalLight = brightness * faceLight;
+	float totalLight = faceLight;
 
 	vec3 finalLight = LightColor * totalLight;
 

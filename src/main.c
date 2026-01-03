@@ -1,6 +1,7 @@
 #include "block.h"
 #include "disk.h"
 #include <GL/glcorearb.h>
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -19,6 +20,7 @@
 #include "map.h"
 #include "pool.h"
 #include "oglpool.h"
+#include "thread.h"
 #include "mesh.h"
 
 #include "shaders/vert2.c"
@@ -54,7 +56,7 @@ typedef struct {
 	float fov;
 } Camera;
 
-size_t get_max_threads()
+static size_t get_max_threads()
 {
 	size_t num_threads = 1;
 
@@ -131,6 +133,7 @@ typedef struct {
 typedef struct {
 	ChunkPool pool;
 	OGLPool ogl_pool;
+	ThreadPool thread;
 	RenderMap render_map;
 	MeshQueue mesh;
 	size_t chunk_count;
@@ -496,6 +499,8 @@ void chunk_render(OGLPool *pool, Chunk *chunk, ShaderData shader_data)
 {
 	if (!chunk->up_to_date || !chunk->has_oglpool_reference)
 		return;
+	// if (!chunk->has_oglpool_reference)
+	// 	return;
 	if (chunk->face_count == 0) {
 		// VERROR("This guy again:");
 		return;
@@ -641,6 +646,8 @@ void world_init(World *world)
 
 	world->seed = time(NULL);
 
+	threadpool_init(&world->thread, 0, &world->pool, &world->ogl_pool, &world->render_map, &world->mesh, world->seed);
+
 	// size_t pl = 0;
 	// ChunkIterator it = {
 	// 	.coord.x = -RENDER_DISTANCE_X,
@@ -720,16 +727,16 @@ typedef struct {
 // 	VINFO("Amount :%i", (mesh->writei) - (mesh->readi));
 // }
 
-void world_render(World *world, ChunkVertsScratch *tmp_chunk_verts, ShaderData shader_data)
+void world_render(World *world, ShaderData shader_data)
 {
 	time_t current_time = time(NULL);
 	// if ((world->mesh.writei - world->mesh.readi) != 0)
 	// 	print_meshqueue(&world->mesh);
 	// print_pool(&world->pool);
-	meshqueue_process(1024, &world->mesh, &world->pool, &world->render_map, &world->ogl_pool, tmp_chunk_verts, world->seed);
+	meshqueue_process(1024, &world->mesh, &world->thread.mesh_resource, &world->render_map, &world->ogl_pool);
 
-	for (int z = -RENDER_DISTANCE_Z; z <= RENDER_DISTANCE_Z; z++) {
-		for (int y = -RENDER_DISTANCE_Y; y <= RENDER_DISTANCE_Y; y++) {
+	for (int y = -RENDER_DISTANCE_Y; y <= RENDER_DISTANCE_Y; y++) {
+		for (int z = -RENDER_DISTANCE_Z; z <= RENDER_DISTANCE_Z; z++) {
 			for (int x = -RENDER_DISTANCE_X; x <= RENDER_DISTANCE_X; x++) {
 				ChunkCoord coord = {
 					world->player.chunk_pos.x + x,
@@ -765,7 +772,7 @@ Block blocktype_to_block(BLOCKTYPE type)
 	case BlocktypeStone:
 		block.obstructing = true;
 		block.type = BlocktypeStone;
-		block_make_light(&block, (Color){ rand() % 255, rand() % 255, rand() % 255, 1 }, 15);
+		block_make_light(&block, (Color){ rand() % 255, rand() % 255, rand() % 255, 1 });
 		break;
 	default:
 		break;
@@ -776,7 +783,7 @@ Block blocktype_to_block(BLOCKTYPE type)
 void player_print_block(Player *player, OGLPool *ogl, RenderMap *map, ChunkPool *pool, size_t seed)
 {
 	Block block = pool_read_block(pool, ogl, map, &player->pos, seed);
-	VINFO("Pos: x: %i, y: %i, z: %i", player->pos.x, player->pos.y, player->pos.z);
+	VINFO("Pos: x: %i, y: %i, z: %i", player->pos.x, player->pos.y, player->pos.z)
 	print_block(&block);
 }
 void player_break_block(ChunkPool *pool, OGLPool *ogl, RenderMap *map, const WorldCoord *pos, size_t seed)
@@ -874,89 +881,95 @@ static inline Block chunk_blockpos_at(const Chunk *chunk, const BlockPos *pos)
 	return chunk->data[CHUNK_INDEX(pos->x, pos->y, pos->z)];
 }
 
-#define MESH_CHUNKS_INVOLVED 27
-#define MESH_INVOLVED_CENTRE 14
-#define MESH_INVOLVED_STRIDE_Y 9
-#define MESH_INVOLVED_STRIDE_Z 3
 void meshqueue_init(MeshQueue *mesh, size_t up_cap, size_t new_cap)
 {
-	VASSERT(is_power_of_two(up_cap));
-	VASSERT(is_power_of_two(new_cap));
-	mesh->up.mask = up_cap - 1;
-	mesh->up.chunks = calloc(up_cap, sizeof(mesh->up.chunks[0]));
-	VASSERT_RELEASE_MSG(mesh->up.chunks != NULL, "Buy more RAM");
-	mesh->new.chunks = calloc(new_cap, sizeof(mesh->new.chunks[0]));
-	VASSERT_RELEASE_MSG(mesh->new.chunks != NULL, "Buy more RAM");
-	mesh->blockdata = calloc(MESH_CHUNKS_INVOLVED * CHUNK_TOTAL_BLOCKS, sizeof(mesh->blockdata[0]));
-	VASSERT_RELEASE_MSG(mesh->blockdata != NULL, "Buy more RAM");
-	mesh->involved = calloc(MESH_CHUNKS_INVOLVED * CHUNK_TOTAL_BLOCKS, sizeof(mesh->involved[0]));
-	VASSERT_RELEASE_MSG(mesh->blockdata != NULL, "Buy more RAM");
-
-	for (size_t i = 0; i < MESH_CHUNKS_INVOLVED; i++) {
-		Chunk chunk = { 0 };
-		chunk.data = mesh->blockdata + i * CHUNK_TOTAL_BLOCKS;
-		mesh->involved[i] = chunk;
-	}
+	// VASSERT(is_power_of_two(up_cap));
+	// VASSERT(is_power_of_two(new_cap));
+	// mesh->up.mask = up_cap - 1;
+	// mesh->up.chunks = calloc(up_cap, sizeof(mesh->up.chunks[0]));
+	// VASSERT_RELEASE_MSG(mesh->up.chunks != NULL, "Buy more RAM");
+	// mesh->new.chunks = calloc(new_cap, sizeof(mesh->new.chunks[0]));
+	// VASSERT_RELEASE_MSG(mesh->new.chunks != NULL, "Buy more RAM");
+	// mesh->blockdata = calloc(MESH_CHUNKS_INVOLVED * CHUNK_TOTAL_BLOCKS, sizeof(mesh->blockdata[0]));
+	// VASSERT_RELEASE_MSG(mesh->blockdata != NULL, "Buy more RAM");
+	// mesh->involved = calloc(MESH_CHUNKS_INVOLVED * CHUNK_TOTAL_BLOCKS, sizeof(mesh->involved[0]));
+	// VASSERT_RELEASE_MSG(mesh->blockdata != NULL, "Buy more RAM");
+	//
+	// for (size_t i = 0; i < MESH_CHUNKS_INVOLVED; i++) {
+	// 	Chunk chunk = { 0 };
+	// 	chunk.data = mesh->blockdata + i * CHUNK_TOTAL_BLOCKS;
+	// 	mesh->involved[i] = chunk;
+	// }
 }
+//
+// void meshqueue_add_update(MeshQueue *mesh, const ChunkCoord coord)
+// {
+// 	if (mesh->up.writei - mesh->up.readi > mesh->up.mask)
+//
+// 		mesh->up.readi = mesh->up.writei - mesh->up.mask;
+//
+// 	mesh->up.chunks[mesh->up.writei & mesh->up.mask] = coord;
+// 	mesh->up.writei++;
+// }
+//
+// void meshqueue_add_new(MeshQueue *mesh, const ChunkCoord coord)
+// {
+// 	if (mesh->new.writei - mesh->new.readi > mesh->new.mask)
+// 		mesh->new.readi = mesh->new.writei - mesh->new.mask;
+//
+// 	mesh->new.chunks[mesh->new.writei & mesh->new.mask] = coord;
+// 	mesh->new.writei++;
+// }
+//
+// bool meshqueue_get_up(MeshQueue *mesh, ChunkCoord *coord)
+// {
+// 	if (mesh->up.readi == mesh->up.writei)
+// 		return false;
+// 	*coord = mesh->up.chunks[mesh->up.readi & mesh->up.mask];
+// 	mesh->up.readi++;
+// 	return true;
+// }
+//
+// bool meshqueue_get_new(MeshQueue *mesh, ChunkCoord *coord)
+// {
+// 	if (mesh->new.readi == mesh->new.writei)
+// 		return false;
+// 	*coord = mesh->new.chunks[mesh->new.readi & mesh->new.mask];
+// 	mesh->new.readi++;
+// 	return true;
+// }
+//
+// bool meshqueue_get(MeshQueue *mesh, ChunkCoord *coord)
+// {
+// 	if (meshqueue_get_up(mesh, coord))
+// 		return true;
+// 	if (meshqueue_get_new(mesh, coord))
+// 		return true;
+//
+// 	return false;
+// }
 
-void meshqueue_add_update(MeshQueue *mesh, const ChunkCoord coord)
+void workers_add_update(ThreadPool *thread, const ChunkCoord coord)
 {
-	if (mesh->up.writei - mesh->up.readi > mesh->up.mask)
-
-		mesh->up.readi = mesh->up.writei - mesh->up.mask;
-
-	mesh->up.chunks[mesh->up.writei & mesh->up.mask] = coord;
-	mesh->up.writei++;
+	// VINFO("%i", thread->system.mesh_up.writepos - thread->system.mesh_up.readpos);
+	workerqueue_push_override(&thread->system.mesh_up, (WorkerTask){ coord, NULL, 0 });
 }
-
-void meshqueue_add_new(MeshQueue *mesh, const ChunkCoord coord)
+void workers_add_new(ThreadPool *thread, const ChunkCoord coord)
 {
-	if (mesh->new.writei - mesh->new.readi > mesh->new.mask)
-		mesh->new.readi = mesh->new.writei - mesh->new.mask;
-
-	mesh->new.chunks[mesh->new.writei & mesh->new.mask] = coord;
-	mesh->new.writei++;
+	workerqueue_push_override(&thread->system.mesh_new, (WorkerTask){ coord, NULL, 0 });
 }
-
-bool meshqueue_get_up(MeshQueue *mesh, ChunkCoord *coord)
-{
-	if (mesh->up.readi == mesh->up.writei)
-		return false;
-	*coord = mesh->up.chunks[mesh->up.readi & mesh->up.mask];
-	mesh->up.readi++;
-	return true;
-}
-
-bool meshqueue_get_new(MeshQueue *mesh, ChunkCoord *coord)
-{
-	if (mesh->new.readi == mesh->new.writei)
-		return false;
-	*coord = mesh->new.chunks[mesh->new.readi & mesh->new.mask];
-	mesh->new.readi++;
-	return true;
-}
-
-bool meshqueue_get(MeshQueue *mesh, ChunkCoord *coord)
-{
-	if (meshqueue_get_up(mesh, coord))
-		return true;
-	if (meshqueue_get_new(mesh, coord))
-		return true;
-
-	return false;
-}
-void mesh_request(RenderMap *map, MeshQueue *mesh, const ChunkCoord *coord)
+void mesh_request(RenderMap *map, ThreadPool *thread, MeshQueue *mesh, const ChunkCoord *coord)
 {
 	Chunk chunk = { 0 };
-	// TODO: check for updated chunks
+	// TODO: make this scream into the void again
 	if (rendermap_get_chunk(map, &chunk, coord)) {
 		// print_chunk(&chunk);
 		if (chunk.up_to_date)
 			return;
-		meshqueue_add_update(mesh, *coord);
+		workers_add_update(thread, *coord);
 		return;
 	}
-	meshqueue_add_new(mesh, *coord);
+	workers_add_new(thread, *coord);
 }
 
 void mesh_add_face(ChunkVertsScratch *buffer, const BlockPos *pos, BLOCKTYPE type, CubeFace face, BlockLight light)
@@ -1078,37 +1091,6 @@ void meshqueue_chunk_load(ChunkPool *pool, Chunk *chunk, const ChunkCoord *coord
 	chunk_generate_terrain(chunk, seed);
 }
 
-void mesh_compute(MeshQueue *mesh, ChunkPool *pool, ChunkVertsScratch *scratch, const ChunkCoord *coord, size_t seed)
-{
-	Chunk *wanted = &mesh->involved[MESH_INVOLVED_CENTRE];
-	VASSERT(wanted->block_count > 0);
-	size_t i = 0;
-	for (int64_t y = coord->y - 1; y <= coord->y + 1; y++)
-		for (int64_t z = coord->z - 1; z <= coord->z + 1; z++)
-			for (int64_t x = coord->x - 1; x <= coord->x + 1; x++) {
-				if (i == MESH_INVOLVED_CENTRE) { // already loaded
-					i++;
-					continue;
-				}
-				memset(mesh->involved[i].data, 0, sizeof(Block) * CHUNK_TOTAL_BLOCKS);
-				chunk_clear_metadata(&mesh->involved[i]);
-				meshqueue_chunk_load(pool, &mesh->involved[i], coord, seed);
-				i++;
-			}
-	for (size_t y = 0; y < CHUNK_TOTAL_Y; y++) {
-		for (size_t z = 0; z < CHUNK_TOTAL_Z; z++) {
-			for (size_t x = 0; x < CHUNK_TOTAL_X; x++) {
-				Block *block = &wanted->data[CHUNK_INDEX(x, y, z)];
-				// chunk->data[CHUNK_INDEX(x, y, z)];
-				if (!block->obstructing)
-					continue;
-				BlockPos pos = { .x = x, .y = y, .z = z };
-
-				mesh_add_block(mesh, &pos, wanted, scratch);
-			}
-		}
-	}
-}
 void mesh_upload_chunk(OGLPool *ogl, ChunkVertsScratch *scratch, Chunk *chunk)
 {
 	chunk->face_count = scratch->lvl / VERTICES_PER_QUAD;
@@ -1135,38 +1117,35 @@ void mesh_upload_chunk(OGLPool *ogl, ChunkVertsScratch *scratch, Chunk *chunk)
 		     chunk->updates_this_cycle > 2 ? GL_DYNAMIC_DRAW : GL_STATIC_DRAW);
 	chunk->has_vbo_data = true;
 }
-static inline void meshqueue_process_element(ChunkCoord *coord, MeshQueue *mesh, ChunkPool *pool, RenderMap *map, OGLPool *ogl, ChunkVertsScratch *scratch, size_t seed)
+static inline void meshqueue_process_element(MeshUploadData *upd, RenderMap *map, OGLPool *ogl)
 {
-	Chunk *wanted = &mesh->involved[MESH_INVOLVED_CENTRE];
-	memset(wanted->data, 0, sizeof(Block) * CHUNK_TOTAL_BLOCKS);
-	chunk_clear_metadata(wanted);
-	meshqueue_chunk_load(pool, wanted, coord, seed);
-	wanted->up_to_date = true;
-	if (wanted->block_count > 0) {
-		clear_chunk_verts_scratch(scratch);
-		mesh_compute(mesh, pool, scratch, coord, seed);
+	Chunk chunk = { 0 };
+	chunk.up_to_date = true;
+	chunk.block_count = upd->block_count;
+	// print_chunk(&chunk);
 
-		mesh_upload_chunk(ogl, scratch, wanted);
-		rendermap_add(map, ogl, wanted);
-	} else
-		rendermap_add(map, ogl, wanted);
+	chunk.coord = upd->coord;
+	if (chunk.block_count > 0) {
+		mesh_upload_chunk(ogl, &upd->buf, &chunk);
+		rendermap_add(map, ogl, &chunk);
+	} else // TODO: empty map
+		rendermap_add(map, ogl, &chunk);
 
-	if (wanted->has_oglpool_reference)
-		oglpool_release_chunk(ogl, wanted);
+	if (chunk.has_oglpool_reference)
+		oglpool_release_chunk(ogl, &chunk);
 }
-void meshqueue_process(size_t max, MeshQueue *mesh, ChunkPool *pool, RenderMap *map, OGLPool *ogl, ChunkVertsScratch *scratch, size_t seed)
+void meshqueue_process(size_t max, MeshQueue *mesh, MeshResourcePool *meshp, RenderMap *map, OGLPool *ogl)
 {
-	ChunkCoord coord = { 0 };
-
-	size_t processed = 0;
-	while (processed < max && meshqueue_get_up(mesh, &coord)) {
-		meshqueue_process_element(&coord, mesh, pool, map, ogl, scratch, seed);
-		processed++;
-	}
-	// for (size_t i = 0; i < 2038; i++) {
-	while (processed < max && meshqueue_get_new(mesh, &coord)) {
-		meshqueue_process_element(&coord, mesh, pool, map, ogl, scratch, seed);
-		processed++;
+	size_t num_proc = 0;
+	for (size_t i = 0; i < meshp->max_uploads && num_proc < max; i++) {
+		if (meshp->upload_status[i] == UPLOAD_STATUS_READY) {
+			MeshUploadData *upd = &meshp->upload_data[i];
+			// VINFO("i: %zu bc: %zu x: %i y: %i z: %i", i, upd->block_count, upd->coord.x, upd->coord.y, upd->coord.z);
+			meshqueue_process_element(upd, map, ogl);
+			meshp->upload_status[i] = UPLOAD_STATUS_FREE;
+			num_proc++;
+		}
+		// VINFO("num_proc: %zu",num_proc);
 	}
 }
 
@@ -1181,6 +1160,7 @@ void world_update(World *world)
 		// if (world->pool.chunk[i].up_to_date) {
 		if (chunk->updates_this_cycle > 0) {
 			// VINFO("bye");
+			// TODO: also outdate appropriate neighbours
 			rendermap_outdate(&world->render_map, &chunk->coord);
 			chunk->cycles_since_update++;
 			chunk->updates_this_cycle = 0;
@@ -1194,11 +1174,6 @@ void world_update(World *world)
 		chunk->cycles_in_pool++;
 	}
 
-	// if (world->pool.lvl < world->pool.cap) {
-	// TODO: something better (or separate thread)
-	// if (new_chunk.x != world->player.chunk_pos.x ||
-	//     new_chunk.y != world->player.chunk_pos.y ||
-	//     new_chunk.z != world->player.chunk_pos.z) {
 	for (int y = RENDER_DISTANCE_Y; y > -RENDER_DISTANCE_Y; y--) {
 		for (int z = -RENDER_DISTANCE_Z; z <= RENDER_DISTANCE_Z; z++) {
 			for (int x = -RENDER_DISTANCE_X; x <= RENDER_DISTANCE_X; x++) {
@@ -1208,40 +1183,12 @@ void world_update(World *world)
 					world->player.chunk_pos.z + z
 				};
 
-				mesh_request(&world->render_map, &world->mesh, &coord);
-				// VINFO("Trying to load: %i %i %i", coord.x, coord.y, coord.z);
-				// VINFO("Loaded index: %i", index);
+				mesh_request(&world->render_map, &world->thread, &world->mesh, &coord);
 			}
 		}
 	}
-	// for (int32_t radius = 0; radius <= MAX(RENDER_DISTANCE_X, MAX(RENDER_DISTANCE_Y, RENDER_DISTANCE_Z)); radius++) {
-	// 	for (int32_t x = -radius; x <= radius; x++) {
-	// 		for (int32_t y = -radius; y <= radius; y++) {
-	// 			for (int32_t z = -radius; z <= radius; z++) {
-	// 				// Only process if exactly at this radius (on the shell)
-	// 				if (abs(x) != radius && abs(y) != radius && abs(z) != radius)
-	// 					continue;
-	//
-	// 				// Check if within render distance
-	// 				if (abs(x) > RENDER_DISTANCE_X ||
-	// 				    abs(y) > RENDER_DISTANCE_Y ||
-	// 				    abs(z) > RENDER_DISTANCE_Z)
-	// 					continue;
-	//
-	// 				ChunkCoord coord = {
-	// 					world->player.chunk_pos.x + x,
-	// 					world->player.chunk_pos.y + y,
-	// 					world->player.chunk_pos.z + z
-	// 				};
-	//
-	// 				mesh_request(&world->render_map, &world->mesh, &coord);
-	// 			}
-	// 		}
-	// 	}
-	// }
-	// }
 }
-void render(GameState *game_state, WindowData window, ShaderData shader_data, ChunkVertsScratch tmp_chunk_verts)
+void render(GameState *game_state, WindowData window, ShaderData shader_data)
 {
 	mat4 view;
 	vec3 camera_pos_plus_front;
@@ -1262,50 +1209,48 @@ void render(GameState *game_state, WindowData window, ShaderData shader_data, Ch
 	glUniformMatrix4fv(shader_data.view_loc, 1, GL_FALSE, (const float *)view);
 	glUniformMatrix4fv(shader_data.projection_loc, 1, GL_FALSE, (const float *)projection);
 
-	world_render(&game_state->world, &tmp_chunk_verts, shader_data);
+	world_render(&game_state->world, shader_data);
 
 	glfwSwapBuffers(window.glfw);
 	glfwPollEvents();
 	GL_CHECK((void)0);
 }
 
-int main()
+void glfw_init(WindowData *window, int width, int height)
 {
 	glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
 	glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
 	glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
-
-	Image imageData = { 0 };
-	if (!load_image(&imageData, "assets/atlas.png"))
-		exit(1);
-	// print_image_info(&imageData);
 	if (!glfwInit()) {
 		exit(1);
 	}
+	window->width = width;
+	window->height = height;
+	window->glfw = glfwCreateWindow(window->width, window->height, "Vonu", NULL, NULL);
 
-	WindowData window = { 0 };
-	window.width = 1080;
-	window.height = 800;
-	window.glfw = glfwCreateWindow(window.width, window.height, "Vonu", NULL, NULL);
-	if (!window.glfw) {
+	if (!window->glfw) {
 		glfwTerminate();
 		exit(1);
 	}
 
-	glfwMakeContextCurrent(window.glfw);
+	glfwMakeContextCurrent(window->glfw);
+	glfwSetCursorPosCallback(window->glfw, mouse_callback);
+	glfwSetFramebufferSizeCallback(window->glfw, framebuffer_size_callback);
+	glfwSetInputMode(window->glfw, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+	glfwSetWindowFocusCallback(window->glfw, window_focus_callback);
+	// glfwSwapInterval(0); // no vsync
+}
+
+void ogl_init(unsigned int *texture)
+{
 	if (!load_gl_functions())
 		exit(1);
 
 	glEnable(GL_DEPTH_TEST);
 	glEnable(GL_DEPTH_CLAMP);
 
-	glfwSetCursorPosCallback(window.glfw, mouse_callback);
-
-	glfwSetFramebufferSizeCallback(window.glfw, framebuffer_size_callback);
-
-	unsigned int texture;
-	glGenTextures(1, &texture);
-	glBindTexture(GL_TEXTURE_2D, texture);
+	glGenTextures(1, texture);
+	glBindTexture(GL_TEXTURE_2D, *texture);
 
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
@@ -1322,25 +1267,413 @@ int main()
 	// glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 	// glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
 	// glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glEnable(GL_CULL_FACE);
+	glCullFace(GL_BACK);
+	// glPolygonMode(GL_FRONT_AND_BACK, GL_LINE); //wireframe
+}
 
+void assets_init(Image *image_data)
+{
+	if (!load_image(image_data, "assets/atlas.png"))
+		exit(1);
 	GLenum format;
-	if (imageData.n_chan == 3) {
+	if (image_data->n_chan == 3) {
 		format = GL_RGB;
-	} else if (imageData.n_chan == 4) {
+	} else if (image_data->n_chan == 4) {
 		format = GL_RGBA;
 	} else {
 		format = GL_RGB;
 	}
 
-	glTexImage2D(GL_TEXTURE_2D, 0, format, imageData.width, imageData.height, 0, format, GL_UNSIGNED_BYTE, imageData.data);
+	glTexImage2D(GL_TEXTURE_2D, 0, format, image_data->width, image_data->height, 0, format, GL_UNSIGNED_BYTE, image_data->data);
 	glGenerateMipmap(GL_TEXTURE_2D);
-	stbi_image_free(imageData.data);
+	stbi_image_free(image_data->data);
+}
+
+void shaders_init(ShaderData *shader_data, unsigned int *texture)
+{
+	if (!create_shader_program(&shader_data->program, vertexShaderSource, fragmentShaderSource))
+		exit(1);
+	glUseProgram(shader_data->program);
+	glUniform1i(glGetUniformLocation(shader_data->program, "texture1"), 0);
+	glActiveTexture(GL_TEXTURE0);
+	glBindTexture(GL_TEXTURE_2D, *texture);
+
+	shader_data->view_loc = glGetUniformLocation(shader_data->program, "view");
+	shader_data->projection_loc = glGetUniformLocation(shader_data->program, "projection");
+	shader_data->model_loc = glGetUniformLocation(shader_data->program, "model");
+}
+
+void snooze(uint64_t ms)
+{
+#ifdef _WIN32
+	Sleep(ms);
+#else
+	struct timespec ts = {
+		.tv_sec = ms / 1000,
+		.tv_nsec = (ms % 1000) * 1000000
+	};
+	nanosleep(&ts, NULL);
+#endif
+}
+void threadpool_pause(ThreadPool *pool)
+{
+	pool->system.paused = true;
+}
+
+void threadpool_resume(ThreadPool *pool)
+{
+	pool->system.paused = false;
+}
+
+bool workerqueue_is_empty(WorkerQueue *queue)
+{
+	size_t r = atomic_load_explicit(&queue->readpos, memory_order_relaxed);
+	size_t w = atomic_load_explicit(&queue->writepos, memory_order_relaxed);
+	// size_t r = queue->readpos;
+	// size_t w = queue->writepos;
+	return r == w;
+}
+bool meshs_empty(WorkerSystem *system)
+{
+	bool ret = true;
+	ret &= workerqueue_is_empty(&system->mesh_up);
+	ret &= workerqueue_is_empty(&system->mesh_new);
+	return ret;
+}
+bool workerqueue_push(WorkerQueue *queue, WorkerTask task)
+{
+	size_t current_writepos = atomic_load_explicit(&queue->writepos, memory_order_relaxed);
+	size_t next_writepos = (current_writepos + 1) % queue->capacity;
+	size_t current_readpos = atomic_load_explicit(&queue->readpos, memory_order_acquire);
+
+	if (next_writepos == current_readpos) {
+		return false;
+	}
+
+	queue->tasks[current_writepos] = task;
+	atomic_thread_fence(memory_order_release);
+	atomic_store_explicit(&queue->writepos, next_writepos, memory_order_release);
+	return true;
+}
+void workerqueue_push_override(WorkerQueue *queue, WorkerTask task)
+{
+	size_t current_writepos = atomic_load_explicit(&queue->writepos, memory_order_relaxed);
+	size_t next_writepos = (current_writepos + 1) % queue->capacity;
+	size_t current_readpos = atomic_load_explicit(&queue->readpos, memory_order_acquire);
+
+	if (next_writepos == queue->readpos) {
+		// size_t new_readpos = (current_writepos - queue->capacity);
+		// size_t new_readpos = (current_readpos + 1) % queue->capacity;
+		// size_t new_readpos = (current_writepos - queue->capacity / 2);
+		size_t new_readpos = (current_readpos + (queue->capacity / 2)) % queue->capacity;
+		atomic_store_explicit((atomic_size_t *)&queue->readpos, new_readpos, memory_order_release);
+	}
+
+	queue->tasks[current_writepos] = task;
+	// VINFO("should hi");
+
+	atomic_thread_fence(memory_order_release);
+	atomic_store_explicit((atomic_size_t *)&queue->writepos, next_writepos, memory_order_release);
+}
+bool workerqueue_pop(WorkerQueue *queue, WorkerTask *task)
+{
+	size_t current_readpos = atomic_load_explicit(&queue->readpos, memory_order_acquire);
+
+	size_t current_writepos = atomic_load_explicit(&queue->writepos, memory_order_acquire);
+	// VINFO("r: %zu w:%zu", current_readpos, current_writepos);
+	if (current_readpos == current_writepos) {
+		return false;
+	}
+
+	size_t next_readpos = (current_readpos + 1) % queue->capacity;
+
+	if (atomic_compare_exchange_weak_explicit((atomic_size_t *)&queue->readpos, &current_readpos, next_readpos, memory_order_release, memory_order_relaxed)) {
+		*task = queue->tasks[current_readpos];
+		return true;
+	}
+	return false;
+}
+
+void meshresourcepool_init(MeshResourcePool *pool, size_t max_users, size_t max_uploads)
+{
+	pool->max_users = max_users;
+	pool->max_uploads = max_uploads;
+	pool->taken = calloc(pool->max_users, sizeof(pool->taken[0]));
+	VASSERT_RELEASE_MSG(pool->taken != NULL, "Buy more RAM");
+	pool->involved = calloc(pool->max_users, sizeof(pool->involved[0]) * MESH_CHUNKS_INVOLVED);
+	VASSERT_RELEASE_MSG(pool->involved != NULL, "Buy more RAM");
+	pool->blockdata = calloc(pool->max_users, sizeof(pool->blockdata[0]) * CHUNK_TOTAL_BLOCKS * MESH_CHUNKS_INVOLVED);
+	VASSERT_RELEASE_MSG(pool->blockdata != NULL, "Buy more RAM");
+	pool->upload_status = calloc(pool->max_uploads, sizeof(pool->upload_status[0]));
+	VASSERT_RELEASE_MSG(pool->upload_status != NULL, "Buy more RAM");
+	pool->upload_data = calloc(pool->max_uploads, sizeof(pool->upload_data[0]));
+	VASSERT_RELEASE_MSG(pool->upload_data != NULL, "Buy more RAM");
+	for (size_t i = 0; i < pool->max_uploads; i++) {
+		pool->upload_data[i].buf.cap = MAX_VERTICES_PER_CHUNK;
+		pool->upload_data[i].buf.data = calloc(pool->upload_data[i].buf.cap, sizeof(pool->upload_data[i].buf.data[0]));
+
+		VASSERT_RELEASE_MSG(pool->upload_data[i].buf.data != NULL, "Buy more RAM");
+	}
+	for (size_t i = 0; i < pool->max_users * MESH_CHUNKS_INVOLVED; i++) {
+		pool->involved[i].data = &pool->blockdata[i * CHUNK_TOTAL_BLOCKS];
+	}
+}
+
+typedef size_t MeshUserIndex;
+typedef size_t MeshUploadIndex;
+typedef struct {
+	MeshUserIndex user;
+	MeshUploadIndex up;
+} MeshResourceHandle;
+bool meshuser_try_acquire(MeshResourcePool *pool, MeshUserIndex *index)
+{
+	for (MeshUserIndex i = 0; i < pool->max_users; i++) {
+		bool expected = false;
+		if (atomic_compare_exchange_weak(&pool->taken[i], &expected, true)) {
+			*index = i;
+			return true;
+		}
+	}
+	return false;
+}
+
+bool meshupload_try_acquire(MeshResourcePool *pool, MeshUploadIndex *index)
+{
+	for (MeshUploadIndex i = 0; i < pool->max_uploads; i++) {
+		size_t expected = UPLOAD_STATUS_FREE;
+		if (atomic_compare_exchange_weak(&pool->upload_status[i], &expected, UPLOAD_STATUS_PROCESSING)) {
+			*index = i;
+			return true;
+		}
+	}
+	return false;
+}
+
+void meshworker_chunk_load(ChunkPool *pool, Chunk *chunk, const ChunkCoord *coord, size_t seed)
+{
+	// TODO: cache
+	// TODO: pull latest from pool
+	chunk->last_used = time(NULL);
+	chunk->coord = *coord;
+	VASSERT(chunk->data != NULL);
+	size_t index;
+	if (pool_get_index(pool, chunk, &index)) {
+		memcpy(chunk->data, pool->chunk[index].data, sizeof(chunk->data[0]) * CHUNK_TOTAL_BLOCKS);
+		chunk->block_count = pool->chunk[index].block_count;
+		// VINFO("count: %zu", chunk->block_count);
+		return;
+	}
+	chunk_generate_terrain(chunk, seed);
+}
+void mesh_compute(MeshQueue *mesh, ChunkPool *pool, ChunkVertsScratch *scratch, const ChunkCoord *coord, size_t seed)
+{
+	Chunk *wanted = &mesh->involved[MESH_INVOLVED_CENTRE];
+	VASSERT(wanted->block_count > 0);
+	size_t i = 0;
+	for (int64_t y = coord->y - 1; y <= coord->y + 1; y++)
+		for (int64_t z = coord->z - 1; z <= coord->z + 1; z++)
+			for (int64_t x = coord->x - 1; x <= coord->x + 1; x++) {
+				if (i == MESH_INVOLVED_CENTRE) { // already loaded
+					i++;
+					continue;
+				}
+				memset(mesh->involved[i].data, 0, sizeof(Block) * CHUNK_TOTAL_BLOCKS);
+				chunk_clear_metadata(&mesh->involved[i]);
+				meshworker_chunk_load(pool, &mesh->involved[i], coord, seed);
+				i++;
+			}
+	for (size_t y = 0; y < CHUNK_TOTAL_Y; y++) {
+		for (size_t z = 0; z < CHUNK_TOTAL_Z; z++) {
+			for (size_t x = 0; x < CHUNK_TOTAL_X; x++) {
+				Block *block = &wanted->data[CHUNK_INDEX(x, y, z)];
+				// chunk->data[CHUNK_INDEX(x, y, z)];
+				if (!block->obstructing)
+					continue;
+				BlockPos pos = { .x = x, .y = y, .z = z };
+
+				mesh_add_block(mesh, &pos, wanted, scratch);
+			}
+		}
+	}
+}
+
+void meshworker_process_mesh(Worker *worker, MeshResourcePool *pool, MeshResourceHandle *res, WorkerTask *task)
+{
+	// VINFO("%i %i %i", task->coord.x, task->coord.y, task->coord.z);
+	MeshUploadData *upd = &pool->upload_data[res->up];
+	clear_chunk_verts_scratch(&upd->buf);
+	MeshQueue mesh = { 0 };
+	mesh.involved = &pool->involved[res->user * MESH_CHUNKS_INVOLVED];
+	mesh.blockdata = &pool->blockdata[res->user * MESH_CHUNKS_INVOLVED * CHUNK_TOTAL_BLOCKS];
+	// VINFO("involved: %p", pool->involved);
+
+	Chunk *wanted = &mesh.involved[MESH_INVOLVED_CENTRE];
+	// VINFO("wanted: %p", wanted);
+	// VINFO("data: %p", wanted->data);
+	memset(wanted->data, 0, sizeof(Block) * CHUNK_TOTAL_BLOCKS);
+	chunk_clear_metadata(wanted);
+	meshworker_chunk_load(worker->context.pool, wanted, &task->coord, worker->context.seed);
+	wanted->up_to_date = true;
+	upd->coord = wanted->coord;
+	upd->block_count = wanted->block_count;
+	if (wanted->block_count > 0) {
+		mesh_compute(&mesh, worker->context.pool, &upd->buf, &task->coord, worker->context.seed);
+	}
+	pool->upload_status[res->up] = UPLOAD_STATUS_READY;
+}
+#ifdef _WIN32
+DWORD WINAPI threads_main(LPVOID arg)
+#else
+void *threads_main(void *arg)
+#endif
+{
+	Worker *worker = (Worker *)arg;
+	WorkerContext *ctx = &worker->context;
+	MeshResourcePool *meshres = ctx->mesh_resource;
+	WorkerTask task = { 0 };
+	MeshResourceHandle res = { 0 };
+	while (true) {
+		if (ctx->system->paused) {
+			snooze(1);
+			continue;
+		}
+		if (!meshs_empty(ctx->system)) {
+			// VINFO("hi");
+			if (meshuser_try_acquire(meshres, &res.user)) {
+				// VINFO("%i", test++);
+				while (meshupload_try_acquire(meshres, &res.up)) {
+					if (workerqueue_pop(&ctx->system->mesh_up, &task)) {
+						// VINFO("hi");
+						meshworker_process_mesh(worker, meshres, &res, &task);
+					} else if (workerqueue_pop(&ctx->system->mesh_new, &task)) {
+						meshworker_process_mesh(worker, meshres, &res, &task);
+					} else {
+						// VINFO("bye");
+						break;
+					}
+					// snooze(1);
+				}
+				meshres->taken[res.user] = false;
+			}
+		} else
+			snooze(1);
+	}
+}
+bool thread_create(Worker *worker)
+{
+#ifdef _WIN32
+	worker->handle = CreateThread(
+		NULL,
+		0,
+		threads_main,
+		worker,
+		0,
+		NULL);
+	if (worker->handle == NULL)
+		return false;
+	return true;
+#else
+	int result = pthread_create(
+		&worker->handle,
+		NULL,
+		threads_main,
+		worker);
+	if (result != 0)
+		return false;
+	return true;
+#endif
+}
+
+void mutex_init(Mutex *mutex)
+{
+#ifdef _WIN32
+	InitializeCriticalSection(mutex);
+#else
+	pthread_mutex_init(mutex, NULL);
+#endif
+}
+void mutex_lock(Mutex *mutex)
+{
+#ifdef _WIN32
+	EnterCriticalSection(mutex);
+#else
+	pthread_mutex_lock(mutex);
+#endif
+}
+void mutex_unlock(Mutex *mutex)
+{
+#ifdef _WIN32
+	LeaveCriticalSection(mutex);
+#else
+	pthread_mutex_unlock(mutex);
+#endif
+}
+void conditional_init(Conditional *cond)
+{
+#ifdef _WIN32
+	InitializeConditionVariable(cond);
+#else
+	pthread_cond_init(cond, NULL);
+#endif
+}
+
+void workerqueue_init(WorkerQueue *queue, size_t capacity)
+{
+	memset(queue, 0, sizeof(*queue));
+	queue->tasks = calloc(capacity, sizeof(WorkerTask));
+	VASSERT_RELEASE_MSG(queue->tasks != NULL, "Buy more RAM");
+	queue->capacity = capacity;
+
+	// mutex_init(&queue->mutex);
+	// conditional_init(&queue->not_empty);
+	// conditional_init(&queue->not_full);
+}
+
+void workersystem_init(WorkerSystem *sys, size_t up_cap, size_t new_cap)
+{
+	workerqueue_init(&sys->mesh_new, new_cap);
+	workerqueue_init(&sys->mesh_up, up_cap);
+}
+void threadpool_init(ThreadPool *thread, size_t num_workers, ChunkPool *pool, OGLPool *ogl_pool, RenderMap *render_map, MeshQueue *mesh_queue, size_t seed)
+{
+	if (thread->num == 0)
+		thread->num = get_max_threads() - 1;
+	thread->workers = calloc(thread->num, sizeof(thread->workers[0]));
+	VASSERT_RELEASE_MSG(thread->workers != NULL, "Buy more RAM");
+
+	// workerqueue_init(&thread->, 1024);
+	meshresourcepool_init(&thread->mesh_resource, 4, 256);
+	workersystem_init(&thread->system, 256, 256);
+
+	thread->shared_context.pool = pool;
+	thread->shared_context.ogl_pool = ogl_pool;
+	thread->shared_context.render_map = render_map;
+	thread->shared_context.mesh_queue = mesh_queue;
+	thread->shared_context.seed = seed;
+	thread->shared_context.system = &thread->system;
+	thread->shared_context.mesh_resource = &thread->mesh_resource;
+
+	for (size_t i = 0; i < thread->num; i++) {
+		Worker *w = &thread->workers[i];
+		w->id = i;
+		w->context = thread->shared_context;
+		VASSERT_RELEASE_MSG(thread_create(w), "Thread Creation failed");
+	}
+}
+
+int main()
+{
+	WindowData window = { 0 };
+	glfw_init(&window, 800, 450);
+	unsigned int texture;
+	ogl_init(&texture);
+
+	Image image_data = { 0 };
+	assets_init(&image_data);
 
 	ShaderData shader_data = { 0 };
-	// VINFO("==vert==:\n%s\n========", vertexShaderSource);
-	// VINFO("==frag==:\n%s\n========", fragmentShaderSource);
-	if (!create_shader_program(&shader_data.program, vertexShaderSource, fragmentShaderSource))
-		exit(1);
+	shaders_init(&shader_data, &texture);
 
 	game_state.world.player.camera = (Camera){
 		.fov = 90.0f,
@@ -1351,13 +1684,6 @@ int main()
 		.front = { 0.0f, 0.0f, -1.0f },
 	};
 
-	// glPolygonMode(GL_FRONT_AND_BACK, GL_LINE); //wireframe
-
-	glEnable(GL_CULL_FACE);
-	glCullFace(GL_BACK);
-
-	// glfwSwapInterval(0); // no vsync
-
 	World *world = &game_state.world;
 	world_init(world);
 
@@ -1367,27 +1693,9 @@ int main()
 	}
 	disk_init(world->uid);
 
-	glUseProgram(shader_data.program);
-	glUniform1i(glGetUniformLocation(shader_data.program, "texture1"), 0);
-	glActiveTexture(GL_TEXTURE0);
-	glBindTexture(GL_TEXTURE_2D, texture);
-
-	glfwSetInputMode(window.glfw, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
-	glfwSetWindowFocusCallback(window.glfw, window_focus_callback);
-	// glfwSetMouseButtonCallback(window.glfw, mouse_button_callback);
-
-	static Vertex tmp_chunk_verts_data[MAX_VERTICES_PER_CHUNK];
-	ChunkVertsScratch tmp_chunk_verts = { .data = tmp_chunk_verts_data, .lvl = 0, .cap = ARRAY_LEN(tmp_chunk_verts_data) };
-
-	{
-		shader_data.view_loc = glGetUniformLocation(shader_data.program, "view");
-		shader_data.projection_loc = glGetUniformLocation(shader_data.program, "projection");
-		shader_data.model_loc = glGetUniformLocation(shader_data.program, "model");
-	}
-
 	// BlockLight light = color_and_range_to_blocklight((Color){ 255, 255, 0, 1 }, 15);
 	// print_blocklight(light);
-	VINFO("%i", get_max_threads());
+	// VINFO("%i", get_max_threads());
 
 	Player *player = &world->player;
 	while (!glfwWindowShouldClose(window.glfw)) {
@@ -1401,11 +1709,13 @@ int main()
 
 		if (game_state.paused) {
 			glfwWaitEvents();
+			threadpool_pause(&world->thread);
 			continue;
 		}
+		threadpool_resume(&world->thread);
+
 		player_update(player);
 
-		// player_print_block(player, &game_state.world.pool, world->seed);
 		if (player->breaking) {
 			player_break_block(&game_state.world.pool, &game_state.world.ogl_pool, &game_state.world.render_map, &player->pos, world->seed);
 			player->breaking = false;
@@ -1416,7 +1726,7 @@ int main()
 		}
 		world_update(world);
 
-		render(&game_state, window, shader_data, tmp_chunk_verts);
+		render(&game_state, window, shader_data);
 	}
 
 	glfwDestroyWindow(window.glfw);
