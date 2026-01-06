@@ -26,6 +26,5 @@ typedef struct {
 	Chunk *involved;
 } MeshQueue;
 
-void meshqueue_init(MeshQueue *mesh, size_t up_cap, size_t new_cap);
 
 #endif // INCLUDE_SRC_MESH_H_

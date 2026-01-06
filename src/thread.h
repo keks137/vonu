@@ -71,11 +71,17 @@ enum { UPLOAD_STATUS_FREE,
        UPLOAD_STATUS_READY,
 };
 typedef struct {
+	BlockLight *data;
+	size_t lvl;
+	size_t cap;
+} LightScratch;
+typedef struct {
 	atomic_bool *taken;
 	// struct MeshResource *resources;
 	size_t max_users;
 	Block *blockdata;
 	Chunk *involved;
+	LightScratch *light_scratch;
 	size_t max_uploads;
 	atomic_size_t *upload_status;
 	MeshUploadData *upload_data;
@@ -106,7 +112,7 @@ typedef struct {
 void threadpool_init(ThreadPool *thread, size_t num_workers, ChunkPool *pool, OGLPool *ogl_pool, RenderMap *render_map, MeshQueue *mesh_queue, size_t seed);
 bool workerqueue_push(WorkerQueue *queue, WorkerTask task);
 void workerqueue_push_override(WorkerQueue *queue, WorkerTask task);
-void meshqueue_process(size_t max, MeshQueue *mesh, MeshResourcePool *meshp, RenderMap *map, OGLPool *ogl);
+void meshqueue_process(size_t max, MeshResourcePool *meshp, RenderMap *map, OGLPool *ogl);
 bool workerqueue_is_empty(WorkerQueue *queue);
 bool meshs_empty(WorkerSystem *system);
 

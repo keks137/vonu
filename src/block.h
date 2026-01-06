@@ -14,6 +14,7 @@ typedef struct {
 #define BLOCKTYPE_NAMES   \
 	X(BlocktypeAir)   \
 	X(BlocktypeGrass) \
+	X(BlocktypeDirt) \
 	X(BlocktypeStone)
 
 typedef enum {
@@ -22,11 +23,9 @@ typedef enum {
 #undef X
 } BLOCKTYPE;
 
-
-
 extern const char *BlockTypeString[];
 
-typedef uint32_t BlockLight; // rgb 1 byte each, range only 4 bits
+typedef uint16_t BlockLight; // rgb 1 byte each, range only 4 bits
 typedef struct {
 	BLOCKTYPE type;
 	bool obstructing;
@@ -39,8 +38,7 @@ typedef struct {
 	int8_t z;
 } BlockPos;
 
-
 BlockLight color_to_blocklight(Color color);
 void block_make_light(Block *block, Color color);
 
-#endif  // INCLUDE_SRC_BLOCK_H_
+#endif // INCLUDE_SRC_BLOCK_H_

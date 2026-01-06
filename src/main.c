@@ -71,10 +71,10 @@ static size_t get_max_threads()
 	return num_threads;
 }
 
-static inline bool is_power_of_two(size_t n)
-{
-	return n && !(n & (n - 1));
-}
+// static inline bool is_power_of_two(size_t n)
+// {
+// 	return n && !(n & (n - 1));
+// }
 #define NANOS_PER_SEC (1000 * 1000 * 1000)
 uint64_t nanos_since_unspecified_epoch(void) // from nob.h
 {
@@ -497,10 +497,13 @@ void print_image_info(Image *image)
 
 void chunk_render(OGLPool *pool, Chunk *chunk, ShaderData shader_data)
 {
+#if 0
 	if (!chunk->up_to_date || !chunk->has_oglpool_reference)
 		return;
-	// if (!chunk->has_oglpool_reference)
-	// 	return;
+#else
+	if (!chunk->has_oglpool_reference)
+		return;
+#endif
 	if (chunk->face_count == 0) {
 		// VERROR("This guy again:");
 		return;
@@ -569,6 +572,7 @@ void texture_get_uv_vertex(float local_u, float local_v, BLOCKTYPE type, CubeFac
 			[FACE_RIGHT] = { 1, 0 },
 			[FACE_BOTTOM] = { 2, 0 },
 			[FACE_TOP] = { 0, 0 } },
+		[BlocktypeDirt] = { [FACE_BACK] = { 2, 0 }, [FACE_FRONT] = { 2, 0 }, [FACE_LEFT] = { 2, 0 }, [FACE_RIGHT] = { 2, 0 }, [FACE_BOTTOM] = { 2, 0 }, [FACE_TOP] = { 2, 0 } },
 		[BlocktypeStone] = { [FACE_BACK] = { 3, 0 }, [FACE_FRONT] = { 3, 0 }, [FACE_LEFT] = { 3, 0 }, [FACE_RIGHT] = { 3, 0 }, [FACE_BOTTOM] = { 3, 0 }, [FACE_TOP] = { 3, 0 } },
 	};
 
@@ -639,8 +643,9 @@ void world_init(World *world)
 	VASSERT_RELEASE_MSG(world->pool.chunk != NULL, "Buy more RAM");
 
 	oglpool_init(&world->ogl_pool, MAX_VISIBLE_CHUNKS * 2);
-	rendermap_init(&world->render_map, 2 * 2048, 2);
-	meshqueue_init(&world->mesh, 1024, 1024);
+	// rendermap_init(&world->render_map, 2 * 2048, 2);
+	rendermap_init(&world->render_map, 1 << 14, 2);
+	// meshqueue_init(&world->mesh, 1024, 1024);
 
 	pool_reserve(&world->pool);
 
@@ -699,10 +704,10 @@ void rendermap_keep_only_in_range(RenderMap *map, OGLPool *pool)
 
 void rendermap_clean_maybe(RenderMap *map, OGLPool *pool)
 {
-	if (map->count > 1.5f * MAX_VISIBLE_CHUNKS) {
-		rendermap_keep_only_in_range(map, pool);
-	}
-	if (map->count > .75f * map->table_size) {
+	// if (map->count > 1.5f * MAX_VISIBLE_CHUNKS) {
+	// 	rendermap_keep_only_in_range(map, pool);
+	// }
+	if (map->count > 0.75f * map->table_size) {
 		rendermap_keep_only_in_range(map, pool);
 	}
 }
@@ -729,11 +734,11 @@ typedef struct {
 
 void world_render(World *world, ShaderData shader_data)
 {
-	time_t current_time = time(NULL);
+	// time_t current_time = time(NULL);
 	// if ((world->mesh.writei - world->mesh.readi) != 0)
 	// 	print_meshqueue(&world->mesh);
 	// print_pool(&world->pool);
-	meshqueue_process(1024, &world->mesh, &world->thread.mesh_resource, &world->render_map, &world->ogl_pool);
+	meshqueue_process(1024, &world->thread.mesh_resource, &world->render_map, &world->ogl_pool);
 
 	for (int y = -RENDER_DISTANCE_Y; y <= RENDER_DISTANCE_Y; y++) {
 		for (int z = -RENDER_DISTANCE_Z; z <= RENDER_DISTANCE_Z; z++) {
@@ -794,6 +799,7 @@ void player_break_block(ChunkPool *pool, OGLPool *ogl, RenderMap *map, const Wor
 }
 void player_place_block(Player *player, BLOCKTYPE blocktype, ChunkPool *pool, OGLPool *ogl, RenderMap *map, const WorldCoord *pos, size_t seed)
 {
+	(void)player;
 	// TODO: check if player is actually allowed to
 	Block block = blocktype_to_block(blocktype);
 
@@ -801,77 +807,6 @@ void player_place_block(Player *player, BLOCKTYPE blocktype, ChunkPool *pool, OG
 	// pool_replace_block(pool, ogl, map, &(WorldCoord){ 0, -10, 0 }, block, seed);
 	// player_print_block(player, ogl, map, pool, seed);
 }
-
-/*
-void light_propagate(World *world, ChunkPool *pool, Blockpos *pos, Blocklight light)
-{
-	if (light_level == 0)
-		return;
-
-	static LightNode queue[CHUNK_TOTAL_BLOCKS * 27];
-	size_t front = 0, rear = 0;
-
-	queue[rear++] = (LightNode){ x, y, z };
-
-	while (front < rear) {
-		LightNode node = queue[front++];
-
-		// Propagate to 6 neighboring blocks
-		LightNode neighbors[] = {
-			{ node.x - 1, node.y, node.z },
-			{ node.x + 1, node.y, node.z },
-			{ node.x, node.y - 1, node.z },
-			{ node.x, node.y + 1, node.z },
-			{ node.x, node.y, node.z - 1 },
-			{ node.x, node.y, node.z + 1 }
-		};
-
-		for (int i = 0; i < 6; i++) {
-			LightNode neighbor = neighbors[i];
-
-			// Get the block at this position
-			WorldCoord coord = { neighbor.x, neighbor.y, neighbor.z };
-			size_t chunk_index;
-			world_cord_to_chunk_and_block(coord);
-			if (!chunk_at(pool, &coord, &chunk_index))
-				continue;
-
-			Chunk *chunk = &pool->chunk[chunk_index];
-			Block *block = chunk_xyz_at(chunk,
-						    neighbor.x - chunk->coord.x * CHUNK_TOTAL_X,
-						    neighbor.y - chunk->coord.y * CHUNK_TOTAL_Y,
-						    neighbor.z - chunk->coord.z * CHUNK_TOTAL_Z);
-
-			if (!block)
-				continue;
-
-			// Skip obstructing blocks (unless they're transparent like glass)
-			if (block->obstructing && !is_transparent_block(block->type))
-				continue;
-
-			// Calculate new light level
-			uint8_t new_level = light_level - 1;
-			if (new_level > LIGHT_MAX_LEVEL)
-				continue;
-
-			// Only update if we're providing more light than what's already there
-			if (new_level > block->light_level) {
-				block->light_level = new_level;
-
-				if (block->light_level == new_level) {
-					block->light_color[0] = r;
-					block->light_color[1] = g;
-					block->light_color[2] = b;
-				}
-
-				// Continue propagation
-				queue[rear++] = neighbor;
-			}
-		}
-	}
-}
-*/
-
 static inline bool blockpos_within_chunk(BlockPos *block_pos)
 {
 	return block_pos->x >= 0 && block_pos->x < CHUNK_TOTAL_X && block_pos->z >= 0 && block_pos->z < CHUNK_TOTAL_Z && block_pos->y >= 0 && block_pos->y < CHUNK_TOTAL_Y;
@@ -881,26 +816,26 @@ static inline Block chunk_blockpos_at(const Chunk *chunk, const BlockPos *pos)
 	return chunk->data[CHUNK_INDEX(pos->x, pos->y, pos->z)];
 }
 
-void meshqueue_init(MeshQueue *mesh, size_t up_cap, size_t new_cap)
-{
-	// VASSERT(is_power_of_two(up_cap));
-	// VASSERT(is_power_of_two(new_cap));
-	// mesh->up.mask = up_cap - 1;
-	// mesh->up.chunks = calloc(up_cap, sizeof(mesh->up.chunks[0]));
-	// VASSERT_RELEASE_MSG(mesh->up.chunks != NULL, "Buy more RAM");
-	// mesh->new.chunks = calloc(new_cap, sizeof(mesh->new.chunks[0]));
-	// VASSERT_RELEASE_MSG(mesh->new.chunks != NULL, "Buy more RAM");
-	// mesh->blockdata = calloc(MESH_CHUNKS_INVOLVED * CHUNK_TOTAL_BLOCKS, sizeof(mesh->blockdata[0]));
-	// VASSERT_RELEASE_MSG(mesh->blockdata != NULL, "Buy more RAM");
-	// mesh->involved = calloc(MESH_CHUNKS_INVOLVED * CHUNK_TOTAL_BLOCKS, sizeof(mesh->involved[0]));
-	// VASSERT_RELEASE_MSG(mesh->blockdata != NULL, "Buy more RAM");
-	//
-	// for (size_t i = 0; i < MESH_CHUNKS_INVOLVED; i++) {
-	// 	Chunk chunk = { 0 };
-	// 	chunk.data = mesh->blockdata + i * CHUNK_TOTAL_BLOCKS;
-	// 	mesh->involved[i] = chunk;
-	// }
-}
+// void meshqueue_init(MeshQueue *mesh, size_t up_cap, size_t new_cap)
+// {
+// VASSERT(is_power_of_two(up_cap));
+// VASSERT(is_power_of_two(new_cap));
+// mesh->up.mask = up_cap - 1;
+// mesh->up.chunks = calloc(up_cap, sizeof(mesh->up.chunks[0]));
+// VASSERT_RELEASE_MSG(mesh->up.chunks != NULL, "Buy more RAM");
+// mesh->new.chunks = calloc(new_cap, sizeof(mesh->new.chunks[0]));
+// VASSERT_RELEASE_MSG(mesh->new.chunks != NULL, "Buy more RAM");
+// mesh->blockdata = calloc(MESH_CHUNKS_INVOLVED * CHUNK_TOTAL_BLOCKS, sizeof(mesh->blockdata[0]));
+// VASSERT_RELEASE_MSG(mesh->blockdata != NULL, "Buy more RAM");
+// mesh->involved = calloc(MESH_CHUNKS_INVOLVED * CHUNK_TOTAL_BLOCKS, sizeof(mesh->involved[0]));
+// VASSERT_RELEASE_MSG(mesh->blockdata != NULL, "Buy more RAM");
+//
+// for (size_t i = 0; i < MESH_CHUNKS_INVOLVED; i++) {
+// 	Chunk chunk = { 0 };
+// 	chunk.data = mesh->blockdata + i * CHUNK_TOTAL_BLOCKS;
+// 	mesh->involved[i] = chunk;
+// }
+// }
 //
 // void meshqueue_add_update(MeshQueue *mesh, const ChunkCoord coord)
 // {
@@ -958,7 +893,7 @@ void workers_add_new(ThreadPool *thread, const ChunkCoord coord)
 {
 	workerqueue_push_override(&thread->system.mesh_new, (WorkerTask){ coord, NULL, 0 });
 }
-void mesh_request(RenderMap *map, ThreadPool *thread, MeshQueue *mesh, const ChunkCoord *coord)
+void mesh_request(RenderMap *map, ThreadPool *thread, const ChunkCoord *coord)
 {
 	Chunk chunk = { 0 };
 	// TODO: make this scream into the void again
@@ -1039,6 +974,14 @@ static inline Block meshqueue_block_at(MeshQueue *mesh, BlockPos *pos)
 	return mesh->blockdata[involved_index];
 }
 
+void print_blockpos(const BlockPos *pos)
+{
+	VINFO("BlockPos: x: %i y: %i z: %i", pos->x, pos->y, pos->z);
+}
+void print_chunkcoord(const ChunkCoord *pos)
+{
+	VINFO("ChunkCoord: x: %i y: %i z: %i", pos->x, pos->y, pos->z);
+}
 void mesh_add_block(MeshQueue *mesh, const BlockPos *pos, const Chunk *chunk, ChunkVertsScratch *scratch)
 {
 	static const vec3 face_offsets[FACES_PER_CUBE] = {
@@ -1065,8 +1008,13 @@ void mesh_add_block(MeshQueue *mesh, const BlockPos *pos, const Chunk *chunk, Ch
 		if (blockpos_within_chunk(&neighbour_pos))
 			neighbor = chunk_blockpos_at(chunk, &neighbour_pos);
 		else {
+			// TODO: rethink this, it's broken
 			neighbor = meshqueue_block_at(mesh, &neighbour_pos);
-			// print_block(&neighbor);
+			// if (neighbor.obstructing) {
+			// 	print_chunkcoord(&chunk->coord);
+			// 	print_blockpos(&neighbour_pos);
+			// 	print_block(&neighbor);
+			// }
 		}
 		if (!neighbor.obstructing) {
 			mesh_add_face(scratch, pos, block.type, face, light);
@@ -1125,7 +1073,7 @@ static inline void meshqueue_process_element(MeshUploadData *upd, RenderMap *map
 	// print_chunk(&chunk);
 
 	chunk.coord = upd->coord;
-	if (chunk.block_count > 0) {
+	if (upd->buf.lvl > 0) {
 		mesh_upload_chunk(ogl, &upd->buf, &chunk);
 		rendermap_add(map, ogl, &chunk);
 	} else // TODO: empty map
@@ -1134,7 +1082,7 @@ static inline void meshqueue_process_element(MeshUploadData *upd, RenderMap *map
 	if (chunk.has_oglpool_reference)
 		oglpool_release_chunk(ogl, &chunk);
 }
-void meshqueue_process(size_t max, MeshQueue *mesh, MeshResourcePool *meshp, RenderMap *map, OGLPool *ogl)
+void meshqueue_process(size_t max, MeshResourcePool *meshp, RenderMap *map, OGLPool *ogl)
 {
 	size_t num_proc = 0;
 	for (size_t i = 0; i < meshp->max_uploads && num_proc < max; i++) {
@@ -1142,6 +1090,7 @@ void meshqueue_process(size_t max, MeshQueue *mesh, MeshResourcePool *meshp, Ren
 			MeshUploadData *upd = &meshp->upload_data[i];
 			// VINFO("i: %zu bc: %zu x: %i y: %i z: %i", i, upd->block_count, upd->coord.x, upd->coord.y, upd->coord.z);
 			meshqueue_process_element(upd, map, ogl);
+			// VINFO("uploaded");
 			meshp->upload_status[i] = UPLOAD_STATUS_FREE;
 			num_proc++;
 		}
@@ -1164,6 +1113,7 @@ void world_update(World *world)
 			rendermap_outdate(&world->render_map, &chunk->coord);
 			chunk->cycles_since_update++;
 			chunk->updates_this_cycle = 0;
+			chunk->cycles_in_pool = 0;
 		}
 
 		if (chunk->cycles_in_pool > 400) {
@@ -1183,7 +1133,7 @@ void world_update(World *world)
 					world->player.chunk_pos.z + z
 				};
 
-				mesh_request(&world->render_map, &world->thread, &world->mesh, &coord);
+				mesh_request(&world->render_map, &world->thread, &coord);
 			}
 		}
 	}
@@ -1466,6 +1416,10 @@ void meshworker_chunk_load(ChunkPool *pool, Chunk *chunk, const ChunkCoord *coor
 	}
 	chunk_generate_terrain(chunk, seed);
 }
+
+void light_propagate()
+{
+}
 void mesh_compute(MeshQueue *mesh, ChunkPool *pool, ChunkVertsScratch *scratch, const ChunkCoord *coord, size_t seed)
 {
 	Chunk *wanted = &mesh->involved[MESH_INVOLVED_CENTRE];
@@ -1483,6 +1437,7 @@ void mesh_compute(MeshQueue *mesh, ChunkPool *pool, ChunkVertsScratch *scratch, 
 				meshworker_chunk_load(pool, &mesh->involved[i], coord, seed);
 				i++;
 			}
+
 	for (size_t y = 0; y < CHUNK_TOTAL_Y; y++) {
 		for (size_t z = 0; z < CHUNK_TOTAL_Z; z++) {
 			for (size_t x = 0; x < CHUNK_TOTAL_X; x++) {
@@ -1519,6 +1474,8 @@ void meshworker_process_mesh(Worker *worker, MeshResourcePool *pool, MeshResourc
 	upd->block_count = wanted->block_count;
 	if (wanted->block_count > 0) {
 		mesh_compute(&mesh, worker->context.pool, &upd->buf, &task->coord, worker->context.seed);
+		if (upd->buf.lvl == 0)
+			VWARN("huh? bc: %zu x: %i y: %i z: %i", wanted->block_count, task->coord.x, task->coord.y, task->coord.z);
 	}
 	pool->upload_status[res->up] = UPLOAD_STATUS_READY;
 }
@@ -1556,6 +1513,7 @@ void *threads_main(void *arg)
 				}
 				meshres->taken[res.user] = false;
 			}
+			snooze(1);
 		} else
 			snooze(1);
 	}
@@ -1637,6 +1595,7 @@ void workersystem_init(WorkerSystem *sys, size_t up_cap, size_t new_cap)
 }
 void threadpool_init(ThreadPool *thread, size_t num_workers, ChunkPool *pool, OGLPool *ogl_pool, RenderMap *render_map, MeshQueue *mesh_queue, size_t seed)
 {
+	thread->num = num_workers;
 	if (thread->num == 0)
 		thread->num = get_max_threads() - 1;
 	thread->workers = calloc(thread->num, sizeof(thread->workers[0]));
@@ -1664,8 +1623,10 @@ void threadpool_init(ThreadPool *thread, size_t num_workers, ChunkPool *pool, OG
 
 int main()
 {
+	VINFO("%zu", sizeof(BLOCKTYPE));
 	WindowData window = { 0 };
-	glfw_init(&window, 800, 450);
+	glfw_init(&window, 1600, 900);
+	// glfw_init(&window, 1920, 1080);
 	unsigned int texture;
 	ogl_init(&texture);
 
@@ -1679,7 +1640,7 @@ int main()
 		.fov = 90.0f,
 		.yaw = -00.0f,
 		.pitch = 0.0f,
-		.pos = { 0.0f, 30.0f, 0.0f },
+		.pos = { 0.0f, 30.0f, 000000000.0f },
 		.up = { 0.0f, 1.0f, 0.0f },
 		.front = { 0.0f, 0.0f, -1.0f },
 	};

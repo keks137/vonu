@@ -75,7 +75,7 @@ void get_chunks_dir_path(char *buf, size_t buf_size, const char *world_uid)
 	strbcat(buf, PATH_SEPARATOR_STR, buf_size);
 }
 
-static void ensure_chunk_dir(const char *world_uid)
+void ensure_chunk_dir(const char *world_uid)
 {
 	static bool checked = false;
 	static bool found = false;
@@ -278,7 +278,7 @@ static const char *get_pathless_file(const char *filename)
 	return last_separator + 1;
 }
 
-static bool parse_chunk_filename(const char *filename, ChunkCoord *coord)
+bool parse_chunk_filename(const char *filename, ChunkCoord *coord)
 {
 	ChunkCoord got = { 0 };
 	const char *file = get_pathless_file(filename);

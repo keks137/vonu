@@ -19,6 +19,11 @@ static inline uint32_t triple_hash(const RenderMap *map, const ChunkCoord *key)
 	h ^= h >> 33;
 
 	return (uint32_t)(h & (map->table_size - 1));
+	// uint32_t h = 2166136261u;
+	// h = (h * 16777619) ^ key->x;
+	// h = (h * 16777619) ^ key->y;
+	// h = (h * 16777619) ^ key->z;
+	// return h & (map->table_size - 1);
 }
 
 static inline bool chunkcoord_match(const ChunkCoord *a, const ChunkCoord *b)
@@ -80,6 +85,8 @@ static bool rendermap_add_opt(RenderMap *map, OGLPool *pool, Chunk *chunk, size_
 			entry->flags &= ~HashMapFlagDeleted;
 			entry->off_by = off_count;
 			map->deleted_count--;
+			map->count++;
+			return true;
 		} else {
 			if (entry->flags & HashMapFlagOccupied) {
 				if (entry->off_by == off_count)
@@ -118,7 +125,7 @@ static bool rendermap_add_opt(RenderMap *map, OGLPool *pool, Chunk *chunk, size_
 
 	} while (true);
 
-	VERROR("Hashmap full failed cycle");
+	VERROR("Hashmap full: %zu failed cycle", map->count);
 	return false;
 }
 bool rendermap_add(RenderMap *map, OGLPool *pool, Chunk *chunk)
@@ -183,12 +190,13 @@ size_t rendermap_next_buffer(const RenderMap *map)
 }
 bool rendermap_add_next_buffer(RenderMap *map, OGLPool *pool, Chunk *chunk)
 {
-	size_t start_count = map->count;
 	size_t next_buffer = rendermap_next_buffer(map);
-	map->count_next += map->count - start_count;
 
 	uint32_t index;
 	bool ret = rendermap_add_opt(map, pool, chunk, next_buffer, &index);
+	map->count_next++;
+	map->count--;
+	// VINFO("incr: %zu", map->count - start_count);
 	if (ret)
 		map->entry[next_buffer][index].flags |= HashMapFlagStaysNext;
 	return ret;
@@ -212,6 +220,8 @@ void rendermap_advance_buffer(RenderMap *map, OGLPool *pool)
 	map->num_buffers = tmp.num_buffers;
 	map->current_buffer = tmp.current_buffer;
 	map->count = tmp.count_next;
+	VINFO("%zu", tmp.count_next);
+	map->count_next = 0;
 	memset(map->entry[map->current_buffer], 0, sizeof(map->entry[0][0]) * map->table_size);
 	map->current_buffer = rendermap_next_buffer(map);
 }
