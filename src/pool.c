@@ -122,7 +122,8 @@ void pool_load_chunk(ChunkPool *pool, OGLPool *ogl, RenderMap *map, const ChunkC
 void pool_update_chunk(ChunkPool *pool, OGLPool *ogl, RenderMap *map, const ChunkCoord *pos, Chunk **chunk, size_t seed)
 {
 	size_t index;
-	VASSERT(pool_load(pool, ogl, map, &index, pos, seed));
+	bool loaded = pool_load(pool, ogl, map, &index, pos, seed);
+	VASSERT(loaded);
 	*chunk = &pool->chunk[index];
 	VASSERT(chunk != NULL);
 	(*chunk)->up_to_date = false;
@@ -134,7 +135,8 @@ void pool_update_chunk(ChunkPool *pool, OGLPool *ogl, RenderMap *map, const Chun
 void pool_read_chunk(ChunkPool *pool, OGLPool *ogl, RenderMap *map, const ChunkCoord *pos, Chunk **chunk, size_t seed)
 {
 	size_t index;
-	VASSERT(pool_load(pool, ogl, map, &index, pos, seed));
+	bool loaded = pool_load(pool, ogl, map, &index, pos, seed);
+	VASSERT(loaded);
 	*chunk = &pool->chunk[index];
 	VASSERT(chunk != NULL);
 }
