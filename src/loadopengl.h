@@ -8,7 +8,7 @@
 // #endif //LOADOPENGL_LOAD_FUNCTIONS
 
 #define GLFW_INCLUDE_NONE
-#include <GLFW/glfw3.h>
+#include "../vendor/glfw/include/GLFW/glfw3.h"
 #include <GL/glcorearb.h>
 #include <stdbool.h>
 extern PFNGLVERTEXATTRIBIPOINTERPROC glVertexAttribIPointer;

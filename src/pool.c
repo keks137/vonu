@@ -114,7 +114,8 @@ bool pool_add_keep_ogl(ChunkPool *pool, size_t *index, OGLPool *ogl, size_t ogl_
 void pool_load_chunk(ChunkPool *pool, OGLPool *ogl, RenderMap *map, const ChunkCoord *pos, Chunk **chunk, size_t seed)
 {
 	size_t index;
-	VASSERT(pool_load(pool, ogl, map, &index, pos, seed));
+	bool loaded = pool_load(pool, ogl, map, &index, pos, seed);
+	VASSERT(loaded);
 	*chunk = &pool->chunk[index];
 	VASSERT(chunk != NULL);
 }

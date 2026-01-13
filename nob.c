@@ -22,7 +22,7 @@ void linux_mingw_glfw_flags(Nob_Cmd *cmd)
 {
 	nob_cmd_append(cmd, "-ggdb");
 	nob_cmd_append(cmd, "-DPLATFORM_DESKTOP");
-	nob_cmd_append(cmd, "-I", "./vendor/glfw/include/");
+	// nob_cmd_append(cmd, "-I", "./vendor/glfw/include/");
 }
 void linux_glfw_flags(Nob_Cmd *cmd)
 {
@@ -35,7 +35,7 @@ void linux_glfw_flags(Nob_Cmd *cmd)
 	// nob_cmd_append(cmd, "-fsanitize=undefined,thread"); 
 	nob_cmd_append(cmd, "-DPLATFORM_DESKTOP");
 	nob_cmd_append(cmd, "-D_GLFW_X11");
-	nob_cmd_append(cmd, "-I", "./vendor/glfw/include/");
+	// nob_cmd_append(cmd, "-I", "./vendor/glfw/include/");
 	nob_cmd_append(cmd, "-lm");
 }
 
