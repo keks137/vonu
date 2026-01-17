@@ -6,6 +6,7 @@ Relies on Monolithic Unit Tests
   - [GCC/Clang](#building-gcc-clang)
 
 # Building <a id="building"></a>
+Uses [nob.h](https://github.com/tsoding/nob.h)
 ## MSVC <a id="building-msvc"></a>
 Note: first line is only needed once, the build system rebuilds itself after
 ```cmd
