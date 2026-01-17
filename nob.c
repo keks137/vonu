@@ -28,7 +28,8 @@ void linux_glfw_flags(Nob_Cmd *cmd)
 {
 	nob_cmd_append(cmd, "-ggdb");
 	nob_cmd_append(cmd, "-pthread");
-	nob_cmd_append(cmd, "-DPROFILING");
+	// nob_cmd_append(cmd, "-DPROFILING");
+	// nob_cmd_append(cmd, "-DNDEBUG");
 	// nob_cmd_append(cmd, "-std=c99");
 	// nob_cmd_append(cmd, "-O2");
 	// nob_cmd_append(cmd, "-O3");

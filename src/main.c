@@ -151,7 +151,6 @@ static double get_clock_multiplier(void)
 	return multiplier;
 }
 
-
 #define SPALL_BUFFER_SIZE (100 * 1024 * 1024)
 
 SpallProfile spall_ctx;
@@ -434,7 +433,10 @@ static void print_image_info(Image *image)
 }
 
 #ifdef NDEBUG
-#define GL_CHECK(stmt) (void)0
+#define GL_CHECK(stmt) \
+	do {           \
+		stmt;  \
+	} while (0)
 #else
 #define GL_CHECK(stmt)                                                                                            \
 	do {                                                                                                      \
@@ -885,6 +887,9 @@ static void world_update(World *world)
 static void render(GameState *game_state, WindowData window, ShaderData shader_data)
 {
 	// BEGIN_FUNC();
+	BEGIN_SECT("Buffer Swap");
+	glfwSwapBuffers(window.glfw);
+	END_SECT("Buffer Swap");
 	BEGIN_SECT("Other Stuff");
 	mat4 view;
 	vec3 camera_pos_plus_front;
@@ -908,9 +913,6 @@ static void render(GameState *game_state, WindowData window, ShaderData shader_d
 	END_SECT("Other Stuff");
 	world_render(&game_state->world, shader_data);
 
-	BEGIN_SECT("Buffer Swap");
-	glfwSwapBuffers(window.glfw);
-	END_SECT("Buffer Swap");
 	BEGIN_SECT("Poll Events");
 	glfwPollEvents();
 	END_SECT("Poll Events");
@@ -923,6 +925,9 @@ static void glfw_init(WindowData *window, int width, int height)
 	glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
 	glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
 	glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+	glfwWindowHint(GLFW_DOUBLEBUFFER, GLFW_TRUE);
+	glfwWindowHint(GLFW_DECORATED, GLFW_TRUE);
+
 	if (!glfwInit()) {
 		exit(1);
 	}
@@ -1146,13 +1151,9 @@ bool meshupload_try_acquire(MeshResourcePool *pool, MeshUploadIndex *index)
 	return false;
 }
 
-
 static void light_propagate()
 {
 }
-
-
-
 
 bool running;
 

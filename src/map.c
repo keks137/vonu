@@ -2,6 +2,7 @@
 #include "chunk.h"
 #include "logs.h"
 #include "oglpool.h"
+#include "profiling.h"
 #include "vassert.h"
 #include <stddef.h>
 #include <stdint.h>
@@ -55,12 +56,15 @@ bool rendermap_init(RenderMap *map, size_t table_size, size_t num_buffers)
 
 bool rendermap_get_chunk(RenderMap *map, Chunk *chunk, const ChunkCoord *key)
 {
+	BEGIN_FUNC();
 	size_t index;
 	if (rendermap_find(map, key, &index)) {
 		// (void)chunk; // shut up clangd
 		*chunk = map->entry[map->current_buffer][index].chunk;
+		END_FUNC();
 		return true;
 	}
+	END_FUNC();
 	return false;
 }
 
@@ -144,6 +148,7 @@ void rendermap_outdate(RenderMap *map, const ChunkCoord *key)
 
 bool rendermap_find(const RenderMap *map, const ChunkCoord *key, size_t *index)
 {
+	// BEGIN_FUNC();
 	size_t idx;
 	if (index == NULL)
 		index = &idx;
@@ -163,6 +168,7 @@ bool rendermap_find(const RenderMap *map, const ChunkCoord *key, size_t *index)
 
 		if (off_count == entry->off_by) {
 			if (chunkcoord_match(key, &entry->chunk.coord)) {
+				// END_FUNC();
 				return true;
 			}
 			if (!(entry->flags & HashMapFlagCarry))
@@ -178,6 +184,7 @@ next_loop:
 		continue;
 	} while (true);
 
+	// END_FUNC();
 	return false;
 }
 

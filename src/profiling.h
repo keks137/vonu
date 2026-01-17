@@ -31,6 +31,8 @@
 #else
 #define BEGIN_FUNC() (void)0;
 #define END_FUNC() (void)0;
+#define BEGIN_SECT(name) (void)0;
+#define END_SECT(name) (void)0;
 #endif // PROFILING
 
 #ifdef PROFILING
