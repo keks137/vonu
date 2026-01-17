@@ -22,7 +22,6 @@ void linux_mingw_glfw_flags(Nob_Cmd *cmd)
 {
 	nob_cmd_append(cmd, "-ggdb");
 	nob_cmd_append(cmd, "-DPLATFORM_DESKTOP");
-	// nob_cmd_append(cmd, "-I", "./vendor/glfw/include/");
 }
 void linux_glfw_flags(Nob_Cmd *cmd)
 {
@@ -32,10 +31,9 @@ void linux_glfw_flags(Nob_Cmd *cmd)
 	// nob_cmd_append(cmd, "-O2");
 	// nob_cmd_append(cmd, "-O3");
 	// nob_cmd_append(cmd, "-fsanitize=address,undefined"); // soo useful
-	// nob_cmd_append(cmd, "-fsanitize=undefined,thread"); 
+	// nob_cmd_append(cmd, "-fsanitize=undefined,thread");
 	nob_cmd_append(cmd, "-DPLATFORM_DESKTOP");
 	nob_cmd_append(cmd, "-D_GLFW_X11");
-	// nob_cmd_append(cmd, "-I", "./vendor/glfw/include/");
 	nob_cmd_append(cmd, "-lm");
 }
 
@@ -105,6 +103,23 @@ bool linux_mingw_build(Nob_Cmd *cmd)
 		return false;
 	return true;
 }
+
+bool msvc_build(Nob_Cmd *cmd)
+{
+	nob_cmd_append(cmd, "cl");
+	nob_cmd_append(cmd, "/experimental:c11atomics");
+	nob_cmd_append(cmd, "/std:c11");
+	nob_cmd_append(cmd, "/W4");
+	nob_cmd_append(cmd, "/O2");
+	nob_cmd_append(cmd, "/I" "./vendor");
+	append_source_files(cmd);
+	nob_cmd_append(cmd, "vendor/rglfw.c");
+	nob_cmd_append(cmd, "/Fe:bin/vonu.exe");
+	nob_cmd_append(cmd, "/link gdi32.lib user32.lib shell32.lib ");
+	if (!nob_cmd_run(cmd))
+		return false;
+	return true;
+}
 int main(int argc, char *argv[])
 {
 	NOB_GO_REBUILD_URSELF(argc, argv);
@@ -115,10 +130,16 @@ int main(int argc, char *argv[])
 		exit(1);
 	Nob_Cmd cmd = { 0 };
 
+#if _MSC_VER
+
+	if (!msvc_build(&cmd))
+		exit(1);
+#else
 	if (!linux_build(&cmd))
 		exit(1);
 	if (argc == 2) {
 		if (!linux_mingw_build(&cmd))
 			exit(1);
 	}
+#endif
 }
