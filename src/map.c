@@ -79,7 +79,8 @@ static bool rendermap_add_opt(RenderMap *map, OGLPool *pool, Chunk *chunk, size_
 		if (entry->flags & HashMapFlagDeleted) {
 			memset(entry, 0, sizeof(*entry));
 			entry->chunk = *chunk;
-			if (chunk->has_oglpool_reference)
+
+			if (chunk->oglpool_index != 0)
 				oglpool_reference_chunk(pool, &entry->chunk, chunk->oglpool_index);
 			entry->flags |= HashMapFlagOccupied;
 			entry->flags &= ~HashMapFlagDeleted;
@@ -98,17 +99,18 @@ static bool rendermap_add_opt(RenderMap *map, OGLPool *pool, Chunk *chunk, size_
 					// VASSERT(entry->chunk.oglpool_index == chunk->oglpool_index);
 					if (entry->chunk.oglpool_index != chunk->oglpool_index) {
 						// VWARN("Replacing map's reference instead of reusing");
-						oglpool_release_chunk(pool, &entry->chunk);
+						if (entry->chunk.oglpool_index != 0)
+							oglpool_release_chunk(pool, &entry->chunk);
 					}
 					entry->chunk = *chunk;
-					if (chunk->has_oglpool_reference)
+					if (chunk->oglpool_index != 0)
 						oglpool_reference_chunk(pool, &entry->chunk, chunk->oglpool_index);
 
 					return true;
 				}
 			} else {
 				entry->chunk = *chunk;
-				if (chunk->has_oglpool_reference)
+				if (chunk->oglpool_index != 0)
 					oglpool_reference_chunk(pool, &entry->chunk, chunk->oglpool_index);
 				entry->flags |= HashMapFlagOccupied;
 				entry->off_by = off_count;
@@ -208,7 +210,7 @@ void rendermap_advance_buffer(RenderMap *map, OGLPool *pool)
 
 	for (size_t i = 0; i < map->table_size; i++) {
 		RenderMapEntry *entry = &map->entry[map->current_buffer][i];
-		if (entry->chunk.has_oglpool_reference && !(entry->flags & HashMapFlagStaysNext)) {
+		if (entry->chunk.oglpool_index != 0 && !(entry->flags & HashMapFlagStaysNext)) {
 			oglpool_release_chunk(pool, &entry->chunk);
 		}
 	}

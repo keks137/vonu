@@ -77,10 +77,14 @@ void oglpool_init(OGLPool *pool, size_t cap)
 	for (size_t i = 0; i < pool->cap; i++) {
 		oglitem_init(pool, &pool->items[i]);
 	}
+
+	pool->free_count++; // ignore first
 	while (pool->free_count < pool->cap) {
 		pool->free_stack[pool->free_count] = pool->free_count;
 		pool->free_count++;
 	}
+	pool->free_count--; // ignore first
+	VASSERT(pool->free_count < pool->cap);
 }
 static bool oglpool_claim(OGLPool *pool, size_t *index)
 {
@@ -91,6 +95,7 @@ static bool oglpool_claim(OGLPool *pool, size_t *index)
 
 	pool->free_count--;
 	*index = pool->free_stack[pool->free_count];
+	VASSERT_MSG(index != 0, "Invalid reference");
 	VASSERT(pool->items[*index].references == 0);
 	pool->items[*index].references = 1;
 	pool->used++;
@@ -101,7 +106,7 @@ static void oglpool_release(OGLPool *pool, size_t index)
 	VASSERT(pool->items[index].references > 0);
 	pool->items[index].references--;
 	if (pool->items[index].references == 0) {
-		VASSERT(pool->used != 0);
+		VASSERT(pool->used > 1);
 		pool->used--;
 		pool->free_stack[pool->free_count] = index;
 		pool->free_count++;
@@ -114,24 +119,22 @@ void oglpool_reference(OGLPool *pool, size_t index)
 }
 bool oglpool_claim_chunk(OGLPool *pool, Chunk *chunk)
 {
-	VASSERT(!chunk->has_oglpool_reference);
+	VASSERT(chunk->oglpool_index == 0);
 	if (oglpool_claim(pool, &chunk->oglpool_index)) {
-		chunk->has_oglpool_reference = true;
 		return true;
 	}
 	return false;
 }
 void oglpool_release_chunk(OGLPool *pool, Chunk *chunk)
 {
-	VASSERT_WARN(chunk->has_oglpool_reference);
-	if (chunk->has_oglpool_reference) {
+	VASSERT(chunk->oglpool_index != 0);
+	if (chunk->oglpool_index != 0) {
 		oglpool_release(pool, chunk->oglpool_index);
-		chunk->has_oglpool_reference = false;
+		chunk->oglpool_index = 0;
 	}
 }
 void oglpool_reference_chunk(OGLPool *pool, Chunk *chunk, size_t index)
 {
 	chunk->oglpool_index = index;
-	chunk->has_oglpool_reference = true;
 	oglpool_reference(pool, chunk->oglpool_index);
 }

@@ -57,7 +57,7 @@ typedef struct {
 	size_t light_count;
 	ChunkCoord coord;
 	size_t oglpool_index;
-	bool has_oglpool_reference;
+	// bool has_oglpool_reference;
 	size_t face_count;
 	size_t block_count;
 	bool up_to_date;

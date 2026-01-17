@@ -60,7 +60,6 @@ void print_chunk(Chunk *chunk)
 	VINFO("block_count: %i", chunk->block_count);
 	VINFO("face_count: %i", chunk->face_count);
 	VINFO("cycles_since_update: %i", chunk->cycles_since_update);
-	VINFO("has_oglpool_reference: %s", chunk->has_oglpool_reference ? "true" : "false");
 	// if (chunk->has_oglpool_reference)
 	VINFO("oglpool_index: %i", chunk->oglpool_index);
 }

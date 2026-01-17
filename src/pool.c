@@ -231,7 +231,7 @@ void pool_empty(ChunkPool *pool, OGLPool *ogl, size_t index)
 	// TODO: store completely empty chunks somewhere else, since they don't need a VBO anyways
 	// VASSERT_MSG(pool->chunk[index].up_to_date || pool->chunk[index].block_count == 0, "There was no reason to unload this");
 	Chunk *chunk = &pool->chunk[index];
-	if (chunk->has_oglpool_reference)
+	if (chunk->oglpool_index != 0)
 		oglpool_release_chunk(ogl, chunk);
 
 	pool->lvl--;
@@ -269,7 +269,7 @@ bool pool_load(ChunkPool *pool, OGLPool *ogl, RenderMap *map, size_t *index, con
 	}
 	if (rendermap_find(map, coord, index)) {
 		Chunk *old_chunk = &map->entry[map->current_buffer][*index].chunk;
-		if (old_chunk->has_oglpool_reference) {
+		if (old_chunk->oglpool_index != 0) {
 			if (pool_add_keep_ogl(pool, index, ogl, old_chunk->oglpool_index, coord, seed))
 				return true;
 		}

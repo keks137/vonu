@@ -23,6 +23,14 @@
 #include "thread.h"
 #include "mesh.h"
 
+#ifdef PROFILING
+#include "../vendor/spall.h"
+#include <linux/perf_event.h>
+#include <asm/unistd.h>
+#include <sys/mman.h>
+#include <immintrin.h>
+#endif //PROFILING
+
 #include "shaders/vert2.c"
 #include "shaders/frag2.c"
 
@@ -107,14 +115,75 @@ typedef enum {
 	FACE_TOP
 } CubeFace;
 
-void print_blocklight(BlockLight light)
+static void print_blocklight(BlockLight light)
 {
 	VINFO("r: %u", light >> 8 * 3 & 0xFF);
 	VINFO("g: %u", light >> 8 * 2 & 0xFF);
 	VINFO("b: %u", light >> 8 * 1 & 0xFF);
 	VINFO("range: %u", light >> 8 * 0 & 0xFF);
 }
+#ifdef PROFILING
 
+static uint64_t mul_u64_u32_shr(uint64_t cyc, uint32_t mult, uint32_t shift)
+{
+	__uint128_t x = cyc;
+	x *= mult;
+	x >>= shift;
+	return x;
+}
+
+static long perf_event_open(struct perf_event_attr *hw_event, pid_t pid, int cpu, int group_fd, unsigned long flags)
+{
+	return syscall(__NR_perf_event_open, hw_event, pid, cpu, group_fd, flags);
+}
+static double get_clock_multiplier(void)
+{
+	struct perf_event_attr pe = {
+		.type = PERF_TYPE_HARDWARE,
+		.size = sizeof(struct perf_event_attr),
+		.config = PERF_COUNT_HW_INSTRUCTIONS,
+		.disabled = 1,
+		.exclude_kernel = 1,
+		.exclude_hv = 1
+	};
+
+	int fd = (int)perf_event_open(&pe, 0, -1, -1, 0);
+	if (fd == -1) {
+		perror("perf_event_open failed");
+		return 1;
+	}
+	void *addr = mmap(NULL, 4 * 1024, PROT_READ, MAP_SHARED, fd, 0);
+	if (!addr) {
+		perror("mmap failed");
+		return 1;
+	}
+	struct perf_event_mmap_page *pc = (struct perf_event_mmap_page *)addr;
+	if (pc->cap_user_time != 1) {
+		fprintf(stderr, "Perf system doesn't support user time\n");
+		return 1;
+	}
+	double nanos = (double)mul_u64_u32_shr(1000000000000000ull, pc->time_mult, pc->time_shift);
+	double multiplier = nanos / 1000000000000000.0;
+	return multiplier;
+}
+
+static SpallProfile spall_ctx;
+static _Thread_local SpallBuffer spall_buffer;
+
+#define SPALL_BUFFER_SIZE (100 * 1024 * 1024)
+
+static uint64_t get_clock(void) {
+	return __rdtsc();
+}
+#define BEGIN_FUNC()                                                                                                \
+	do {                                                                                                        \
+		spall_buffer_begin(&spall_ctx, &spall_buffer, __FUNCTION__, sizeof(__FUNCTION__) - 1, get_clock()); \
+	} while (0)
+#define END_FUNC()                                                        \
+	do {                                                              \
+		spall_buffer_end(&spall_ctx, &spall_buffer, get_clock()); \
+	} while (0)
+#endif // PROFILING
 /* #define FOR_CHUNKS_IN_RENDERDISTANCE(...)                                             \
 // 	for (int z = -RENDER_DISTANCE_Z; z <= RENDER_DISTANCE_Z; z++)                 \
 // 		for (int y = -RENDER_DISTANCE_Y; y <= RENDER_DISTANCE_Y; y++)         \
@@ -273,7 +342,7 @@ typedef struct {
 } MouseState;
 MouseState mouse_state;
 
-void mouse_callback(GLFWwindow *window, double xpos, double ypos)
+static void mouse_callback(GLFWwindow *window, double xpos, double ypos)
 {
 	if (game_state.paused)
 		return;
@@ -309,13 +378,13 @@ void mouse_callback(GLFWwindow *window, double xpos, double ypos)
 	glm_normalize(direction);
 	glm_vec3_copy(direction, camera->front);
 }
-void framebuffer_size_callback(GLFWwindow *window, int width, int height)
+static void framebuffer_size_callback(GLFWwindow *window, int width, int height)
 {
 	(void)window;
 	glViewport(0, 0, width, height);
 }
 
-void set_paused(GLFWwindow *window, bool val)
+static void set_paused(GLFWwindow *window, bool val)
 {
 	game_state.paused = val;
 	if (game_state.paused) {
@@ -326,7 +395,7 @@ void set_paused(GLFWwindow *window, bool val)
 	}
 }
 
-void window_focus_callback(GLFWwindow *window, int focused)
+static void window_focus_callback(GLFWwindow *window, int focused)
 {
 	if (focused == GLFW_TRUE) {
 	} else {
@@ -334,7 +403,7 @@ void window_focus_callback(GLFWwindow *window, int focused)
 	}
 }
 
-void process_input(GLFWwindow *window, Player *player)
+static void process_input(GLFWwindow *window, Player *player)
 {
 	static bool escapeKeyPressedLastFrame = false;
 
@@ -479,7 +548,7 @@ bool load_image(Image *img, const char *path)
 	return true;
 }
 
-void print_image_info(Image *image)
+static void print_image_info(Image *image)
 {
 	VINFO("height: %zu", image->height);
 	VINFO("width: %zu", image->width);
@@ -495,13 +564,13 @@ void print_image_info(Image *image)
 		}                                                                                                 \
 	} while (0)
 
-void chunk_render(OGLPool *pool, Chunk *chunk, ShaderData shader_data)
+static void chunk_render(OGLPool *pool, Chunk *chunk, ShaderData shader_data)
 {
 #if 0
 	if (!chunk->up_to_date || !chunk->has_oglpool_reference)
 		return;
 #else
-	if (!chunk->has_oglpool_reference)
+	if (chunk->oglpool_index == 0)
 		return;
 #endif
 	if (chunk->face_count == 0) {
@@ -534,7 +603,7 @@ void chunk_render(OGLPool *pool, Chunk *chunk, ShaderData shader_data)
 	// GL_CHECK(glDrawArrays(GL_TRIANGLES, 0, chunk->vertex_count));
 }
 
-void vec3_assign(vec3 v, float x, float y, float z)
+static void vec3_assign(vec3 v, float x, float y, float z)
 {
 	v[0] = x;
 	v[1] = y;
@@ -562,7 +631,7 @@ static void get_tile_uv(int tileX, int tileY, float local_u, float local_v, floa
 	*v = pixel_v / TEXTURE_ATLAS_SIZE;
 }
 
-void texture_get_uv_vertex(float local_u, float local_v, BLOCKTYPE type, CubeFace face, float *u, float *v)
+static void texture_get_uv_vertex(float local_u, float local_v, BLOCKTYPE type, CubeFace face, float *u, float *v)
 {
 	static const TextureCoords texture_map[256][FACES_PER_CUBE] = {
 		[BlocktypeGrass] = {
@@ -610,7 +679,7 @@ static inline void const_vec3_copy(const vec3 a, vec3 dest)
 	dest[2] = a[2];
 }
 
-void print_block(Block *block)
+static void print_block(Block *block)
 {
 	VINFO("Block: %p", block);
 	VINFO("BlockType: %s", BlockTypeString[block->type]);
@@ -636,7 +705,7 @@ bool next_chunk(ChunkIterator *it)
 	return true;
 }
 
-void world_init(World *world)
+static void world_init(World *world)
 {
 	world->pool.cap = 128;
 	world->pool.chunk = calloc(world->pool.cap, sizeof(Chunk));
@@ -679,7 +748,7 @@ void world_init(World *world)
 	// 	return;
 }
 
-void rendermap_keep_only_in_range(RenderMap *map, OGLPool *pool)
+static void rendermap_keep_only_in_range(RenderMap *map, OGLPool *pool)
 {
 	ChunkIterator it = {
 		.coord.x = -RENDER_DISTANCE_X,
@@ -702,7 +771,7 @@ void rendermap_keep_only_in_range(RenderMap *map, OGLPool *pool)
 	rendermap_advance_buffer(map, pool);
 }
 
-void rendermap_clean_maybe(RenderMap *map, OGLPool *pool)
+static void rendermap_clean_maybe(RenderMap *map, OGLPool *pool)
 {
 	// if (map->count > 1.5f * MAX_VISIBLE_CHUNKS) {
 	// 	rendermap_keep_only_in_range(map, pool);
@@ -712,7 +781,7 @@ void rendermap_clean_maybe(RenderMap *map, OGLPool *pool)
 	}
 }
 
-void player_update(Player *player)
+static void player_update(Player *player)
 {
 	player->pos.x = floorf(player->camera.pos[0]);
 	player->pos.y = floorf(player->camera.pos[1]) - 1;
@@ -732,7 +801,7 @@ typedef struct {
 // 	VINFO("Amount :%i", (mesh->writei) - (mesh->readi));
 // }
 
-void world_render(World *world, ShaderData shader_data)
+static void world_render(World *world, ShaderData shader_data)
 {
 	// time_t current_time = time(NULL);
 	// if ((world->mesh.writei - world->mesh.readi) != 0)
@@ -785,19 +854,19 @@ Block blocktype_to_block(BLOCKTYPE type)
 	return block;
 }
 
-void player_print_block(Player *player, OGLPool *ogl, RenderMap *map, ChunkPool *pool, size_t seed)
+static void player_print_block(Player *player, OGLPool *ogl, RenderMap *map, ChunkPool *pool, size_t seed)
 {
 	Block block = pool_read_block(pool, ogl, map, &player->pos, seed);
 	VINFO("Pos: x: %i, y: %i, z: %i", player->pos.x, player->pos.y, player->pos.z)
 	print_block(&block);
 }
-void player_break_block(ChunkPool *pool, OGLPool *ogl, RenderMap *map, const WorldCoord *pos, size_t seed)
+static void player_break_block(ChunkPool *pool, OGLPool *ogl, RenderMap *map, const WorldCoord *pos, size_t seed)
 {
 	// TODO: check if player is actually allowed to
 	Block block = { 0 };
 	pool_replace_block(pool, ogl, map, pos, block, seed);
 }
-void player_place_block(Player *player, BLOCKTYPE blocktype, ChunkPool *pool, OGLPool *ogl, RenderMap *map, const WorldCoord *pos, size_t seed)
+static void player_place_block(Player *player, BLOCKTYPE blocktype, ChunkPool *pool, OGLPool *ogl, RenderMap *map, const WorldCoord *pos, size_t seed)
 {
 	(void)player;
 	// TODO: check if player is actually allowed to
@@ -884,16 +953,16 @@ static inline Block chunk_blockpos_at(const Chunk *chunk, const BlockPos *pos)
 // 	return false;
 // }
 
-void workers_add_update(ThreadPool *thread, const ChunkCoord coord)
+static void workers_add_update(ThreadPool *thread, const ChunkCoord coord)
 {
 	// VINFO("%i", thread->system.mesh_up.writepos - thread->system.mesh_up.readpos);
 	workerqueue_push_override(&thread->system.mesh_up, (WorkerTask){ coord, NULL, 0 });
 }
-void workers_add_new(ThreadPool *thread, const ChunkCoord coord)
+static void workers_add_new(ThreadPool *thread, const ChunkCoord coord)
 {
 	workerqueue_push_override(&thread->system.mesh_new, (WorkerTask){ coord, NULL, 0 });
 }
-void mesh_request(RenderMap *map, ThreadPool *thread, const ChunkCoord *coord)
+static void mesh_request(RenderMap *map, ThreadPool *thread, const ChunkCoord *coord)
 {
 	Chunk chunk = { 0 };
 	// TODO: make this scream into the void again
@@ -907,7 +976,7 @@ void mesh_request(RenderMap *map, ThreadPool *thread, const ChunkCoord *coord)
 	workers_add_new(thread, *coord);
 }
 
-void mesh_add_face(ChunkVertsScratch *buffer, const BlockPos *pos, BLOCKTYPE type, CubeFace face, BlockLight light)
+static void mesh_add_face(ChunkVertsScratch *buffer, const BlockPos *pos, BLOCKTYPE type, CubeFace face, BlockLight light)
 {
 	// FaceVertices face_verts = cube_vertices[face];
 	const CubeFaceDef *face_def = &cube_faces[face];
@@ -974,15 +1043,15 @@ static inline Block meshqueue_block_at(MeshQueue *mesh, BlockPos *pos)
 	return mesh->blockdata[involved_index];
 }
 
-void print_blockpos(const BlockPos *pos)
+static void print_blockpos(const BlockPos *pos)
 {
 	VINFO("BlockPos: x: %i y: %i z: %i", pos->x, pos->y, pos->z);
 }
-void print_chunkcoord(const ChunkCoord *pos)
+static void print_chunkcoord(const ChunkCoord *pos)
 {
 	VINFO("ChunkCoord: x: %i y: %i z: %i", pos->x, pos->y, pos->z);
 }
-void mesh_add_block(MeshQueue *mesh, const BlockPos *pos, const Chunk *chunk, ChunkVertsScratch *scratch)
+static void mesh_add_block(MeshQueue *mesh, const BlockPos *pos, const Chunk *chunk, ChunkVertsScratch *scratch)
 {
 	static const vec3 face_offsets[FACES_PER_CUBE] = {
 		{ 0, 0, -1 },
@@ -1022,7 +1091,7 @@ void mesh_add_block(MeshQueue *mesh, const BlockPos *pos, const Chunk *chunk, Ch
 	}
 }
 
-void meshqueue_chunk_load(ChunkPool *pool, Chunk *chunk, const ChunkCoord *coord, size_t seed)
+static void meshqueue_chunk_load(ChunkPool *pool, Chunk *chunk, const ChunkCoord *coord, size_t seed)
 {
 	// TODO: cache
 	// TODO: pull latest from pool
@@ -1039,7 +1108,7 @@ void meshqueue_chunk_load(ChunkPool *pool, Chunk *chunk, const ChunkCoord *coord
 	chunk_generate_terrain(chunk, seed);
 }
 
-void mesh_upload_chunk(OGLPool *ogl, ChunkVertsScratch *scratch, Chunk *chunk)
+static void mesh_upload_chunk(OGLPool *ogl, ChunkVertsScratch *scratch, Chunk *chunk)
 {
 	chunk->face_count = scratch->lvl / VERTICES_PER_QUAD;
 
@@ -1048,11 +1117,11 @@ void mesh_upload_chunk(OGLPool *ogl, ChunkVertsScratch *scratch, Chunk *chunk)
 		return;
 	}
 
-	if (!chunk->has_oglpool_reference) {
+	if (chunk->oglpool_index == 0) {
 		if (!oglpool_claim_chunk(ogl, chunk))
 			return;
 	}
-	VASSERT(chunk->has_oglpool_reference);
+	VASSERT(chunk->oglpool_index != 0);
 	OGLItem *item = &ogl->items[chunk->oglpool_index];
 	VASSERT_MSG(item->references > 0, "How did it get here?");
 
@@ -1079,7 +1148,7 @@ static inline void meshqueue_process_element(MeshUploadData *upd, RenderMap *map
 	} else // TODO: empty map
 		rendermap_add(map, ogl, &chunk);
 
-	if (chunk.has_oglpool_reference)
+	if (chunk.oglpool_index != 0)
 		oglpool_release_chunk(ogl, &chunk);
 }
 void meshqueue_process(size_t max, MeshResourcePool *meshp, RenderMap *map, OGLPool *ogl)
@@ -1098,7 +1167,7 @@ void meshqueue_process(size_t max, MeshResourcePool *meshp, RenderMap *map, OGLP
 	}
 }
 
-void world_update(World *world)
+static void world_update(World *world)
 {
 	rendermap_clean_maybe(&world->render_map, &world->ogl_pool);
 	// VINFO("c: %i", world->render_map.count);
@@ -1138,8 +1207,9 @@ void world_update(World *world)
 		}
 	}
 }
-void render(GameState *game_state, WindowData window, ShaderData shader_data)
+static void render(GameState *game_state, WindowData window, ShaderData shader_data)
 {
+	BEGIN_FUNC();
 	mat4 view;
 	vec3 camera_pos_plus_front;
 	Camera *camera = &game_state->world.player.camera;
@@ -1166,7 +1236,7 @@ void render(GameState *game_state, WindowData window, ShaderData shader_data)
 	GL_CHECK((void)0);
 }
 
-void glfw_init(WindowData *window, int width, int height)
+static void glfw_init(WindowData *window, int width, int height)
 {
 	glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
 	glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
@@ -1191,7 +1261,7 @@ void glfw_init(WindowData *window, int width, int height)
 	// glfwSwapInterval(0); // no vsync
 }
 
-void ogl_init(unsigned int *texture)
+static void ogl_init(unsigned int *texture)
 {
 	if (!load_gl_functions())
 		exit(1);
@@ -1222,7 +1292,7 @@ void ogl_init(unsigned int *texture)
 	// glPolygonMode(GL_FRONT_AND_BACK, GL_LINE); //wireframe
 }
 
-void assets_init(Image *image_data)
+static void assets_init(Image *image_data)
 {
 	if (!load_image(image_data, "assets/atlas.png"))
 		exit(1);
@@ -1240,7 +1310,7 @@ void assets_init(Image *image_data)
 	stbi_image_free(image_data->data);
 }
 
-void shaders_init(ShaderData *shader_data, unsigned int *texture)
+static void shaders_init(ShaderData *shader_data, unsigned int *texture)
 {
 	if (!create_shader_program(&shader_data->program, vertexShaderSource, fragmentShaderSource))
 		exit(1);
@@ -1254,7 +1324,7 @@ void shaders_init(ShaderData *shader_data, unsigned int *texture)
 	shader_data->model_loc = glGetUniformLocation(shader_data->program, "model");
 }
 
-void snooze(uint64_t ms)
+static void snooze(uint64_t ms)
 {
 #ifdef _WIN32
 	Sleep(ms);
@@ -1266,12 +1336,12 @@ void snooze(uint64_t ms)
 	nanosleep(&ts, NULL);
 #endif
 }
-void threadpool_pause(ThreadPool *pool)
+static void threadpool_pause(ThreadPool *pool)
 {
 	pool->system.paused = true;
 }
 
-void threadpool_resume(ThreadPool *pool)
+static void threadpool_resume(ThreadPool *pool)
 {
 	pool->system.paused = false;
 }
@@ -1345,7 +1415,7 @@ bool workerqueue_pop(WorkerQueue *queue, WorkerTask *task)
 	return false;
 }
 
-void meshresourcepool_init(MeshResourcePool *pool, size_t max_users, size_t max_uploads)
+static void meshresourcepool_init(MeshResourcePool *pool, size_t max_users, size_t max_uploads)
 {
 	pool->max_users = max_users;
 	pool->max_uploads = max_uploads;
@@ -1400,7 +1470,7 @@ bool meshupload_try_acquire(MeshResourcePool *pool, MeshUploadIndex *index)
 	return false;
 }
 
-void meshworker_chunk_load(ChunkPool *pool, Chunk *chunk, const ChunkCoord *coord, size_t seed)
+static void meshworker_chunk_load(ChunkPool *pool, Chunk *chunk, const ChunkCoord *coord, size_t seed)
 {
 	// TODO: cache
 	// TODO: pull latest from pool
@@ -1417,10 +1487,10 @@ void meshworker_chunk_load(ChunkPool *pool, Chunk *chunk, const ChunkCoord *coor
 	chunk_generate_terrain(chunk, seed);
 }
 
-void light_propagate()
+static void light_propagate()
 {
 }
-void mesh_compute(MeshQueue *mesh, ChunkPool *pool, ChunkVertsScratch *scratch, const ChunkCoord *coord, size_t seed)
+static void mesh_compute(MeshQueue *mesh, ChunkPool *pool, ChunkVertsScratch *scratch, const ChunkCoord *coord, size_t seed)
 {
 	Chunk *wanted = &mesh->involved[MESH_INVOLVED_CENTRE];
 	VASSERT(wanted->block_count > 0);
@@ -1453,7 +1523,7 @@ void mesh_compute(MeshQueue *mesh, ChunkPool *pool, ChunkVertsScratch *scratch, 
 	}
 }
 
-void meshworker_process_mesh(Worker *worker, MeshResourcePool *pool, MeshResourceHandle *res, WorkerTask *task)
+static void meshworker_process_mesh(Worker *worker, MeshResourcePool *pool, MeshResourceHandle *res, WorkerTask *task)
 {
 	// VINFO("%i %i %i", task->coord.x, task->coord.y, task->coord.z);
 	MeshUploadData *upd = &pool->upload_data[res->up];
@@ -1479,10 +1549,13 @@ void meshworker_process_mesh(Worker *worker, MeshResourcePool *pool, MeshResourc
 	}
 	pool->upload_status[res->up] = UPLOAD_STATUS_READY;
 }
+
+bool running;
+
 #ifdef _WIN32
 DWORD WINAPI threads_main(LPVOID arg)
 #else
-void *threads_main(void *arg)
+static void *threads_main(void *arg)
 #endif
 {
 	Worker *worker = (Worker *)arg;
@@ -1490,7 +1563,7 @@ void *threads_main(void *arg)
 	MeshResourcePool *meshres = ctx->mesh_resource;
 	WorkerTask task = { 0 };
 	MeshResourceHandle res = { 0 };
-	while (true) {
+	while (running) {
 		if (ctx->system->paused) {
 			snooze(1);
 			continue;
@@ -1517,6 +1590,7 @@ void *threads_main(void *arg)
 		} else
 			snooze(1);
 	}
+	return 0;
 }
 bool thread_create(Worker *worker)
 {
@@ -1543,7 +1617,7 @@ bool thread_create(Worker *worker)
 #endif
 }
 
-void mutex_init(Mutex *mutex)
+static void mutex_init(Mutex *mutex)
 {
 #ifdef _WIN32
 	InitializeCriticalSection(mutex);
@@ -1551,7 +1625,7 @@ void mutex_init(Mutex *mutex)
 	pthread_mutex_init(mutex, NULL);
 #endif
 }
-void mutex_lock(Mutex *mutex)
+static void mutex_lock(Mutex *mutex)
 {
 #ifdef _WIN32
 	EnterCriticalSection(mutex);
@@ -1559,7 +1633,7 @@ void mutex_lock(Mutex *mutex)
 	pthread_mutex_lock(mutex);
 #endif
 }
-void mutex_unlock(Mutex *mutex)
+static void mutex_unlock(Mutex *mutex)
 {
 #ifdef _WIN32
 	LeaveCriticalSection(mutex);
@@ -1567,7 +1641,7 @@ void mutex_unlock(Mutex *mutex)
 	pthread_mutex_unlock(mutex);
 #endif
 }
-void conditional_init(Conditional *cond)
+static void conditional_init(Conditional *cond)
 {
 #ifdef _WIN32
 	InitializeConditionVariable(cond);
@@ -1576,7 +1650,7 @@ void conditional_init(Conditional *cond)
 #endif
 }
 
-void workerqueue_init(WorkerQueue *queue, size_t capacity)
+static void workerqueue_init(WorkerQueue *queue, size_t capacity)
 {
 	memset(queue, 0, sizeof(*queue));
 	queue->tasks = calloc(capacity, sizeof(WorkerTask));
@@ -1588,7 +1662,7 @@ void workerqueue_init(WorkerQueue *queue, size_t capacity)
 	// conditional_init(&queue->not_full);
 }
 
-void workersystem_init(WorkerSystem *sys, size_t up_cap, size_t new_cap)
+static void workersystem_init(WorkerSystem *sys, size_t up_cap, size_t new_cap)
 {
 	workerqueue_init(&sys->mesh_new, new_cap);
 	workerqueue_init(&sys->mesh_up, up_cap);
@@ -1621,8 +1695,88 @@ void threadpool_init(ThreadPool *thread, size_t num_workers, ChunkPool *pool, OG
 	}
 }
 
+typedef struct {
+	size_t ogl_index;
+	// bool up_to_date;
+} RenderRingItem;
+typedef struct {
+	RenderRingItem *items;
+	ChunkCoord *outdated;
+	size_t outdated_count;
+	size_t outdated_cap;
+	size_t cap;
+	size_t shift_x;
+	size_t shift_z;
+	size_t shift_y;
+	ChunkCoord base;
+} RenderRing;
+
+static void renderring_init(RenderRing *ring, size_t cap, size_t outdated_cap)
+{
+	ring->cap = cap;
+	ring->items = calloc(ring->cap, sizeof(ring->items[0]));
+	VASSERT_RELEASE_MSG(ring->items != NULL, "Buy more RAM");
+	ring->outdated_cap = outdated_cap;
+	ring->outdated = calloc(ring->outdated_cap, sizeof(ring->outdated[0]));
+	VASSERT_RELEASE_MSG(ring->outdated != NULL, "Buy more RAM");
+}
+
+static void renderring_update(RenderRing *ring, ChunkCoord player)
+{
+	ChunkCoord new_base = { 0 };
+	new_base.x = player.x - RENDER_DISTANCE_X;
+	new_base.z = player.z - RENDER_DISTANCE_Z;
+	new_base.y = player.y - RENDER_DISTANCE_Y;
+	int32_t deltax = new_base.x - ring->base.x;
+	int32_t deltaz = new_base.z - ring->base.z;
+	int32_t deltay = new_base.y - ring->base.y;
+	ring->shift_x = (ring->shift_x + deltax) / RENDER_TOTAL_X;
+	ring->shift_z = (ring->shift_z + deltaz) / RENDER_TOTAL_Z;
+	ring->shift_y = (ring->shift_y + deltay) / RENDER_TOTAL_Y;
+}
+
+void threadpool_cleanup(ThreadPool *thread)
+{
+	for (size_t i = 0; i < thread->num; i++) {
+#ifdef _WIN32
+		WaitForSingleObject(thread->workers[i].handle, INFINITE);
+		CloseHandle(thread->workers[i].handle);
+#else
+		pthread_join(thread->workers[i].handle, NULL);
+#endif
+	}
+
+	// MeshResourcePool *meshres = &thread->mesh_resource;
+	// for (size_t i = 0; i < meshres->max_uploads; i++)
+	// 	free(meshres->upload_data[i].buf.data);
+	// free(meshres->upload_data);
+	// free(meshres->upload_status);
+	// free(meshres->blockdata);
+	// free(meshres->involved);
+	// free(meshres->taken);
+	//
+	// free(thread->workers);
+	// free(thread->system.mesh_up.tasks);
+	// free(thread->system.mesh_new.tasks);
+}
+
 int main()
 {
+#ifdef PROFILING
+	spall_init_file("spall_sample.spall", get_clock_multiplier(), &spall_ctx);
+
+	static uint8_t spall_buffer_data[SPALL_BUFFER_SIZE];
+	spall_buffer = (SpallBuffer){
+		.pid = 0,
+		.tid = (uint32_t)(uint64_t)pthread_self(),
+		.length = SPALL_BUFFER_SIZE,
+		.data = spall_buffer_data,
+	};
+	memset(spall_buffer.data, 1, spall_buffer.length);
+	spall_buffer_init(&spall_ctx, &spall_buffer);
+
+#endif // PROFILING
+	running = true;
 	VINFO("%zu", sizeof(BLOCKTYPE));
 	WindowData window = { 0 };
 	glfw_init(&window, 1600, 900);
@@ -1689,6 +1843,12 @@ int main()
 
 		render(&game_state, window, shader_data);
 	}
+	running = false;
+	threadpool_cleanup(&world->thread);
+
+#ifdef PROFILING
+	spall_quit(&spall_ctx);
+#endif //PROFILING
 
 	glfwDestroyWindow(window.glfw);
 	glfwTerminate();
