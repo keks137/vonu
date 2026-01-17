@@ -2,7 +2,6 @@
 #define INCLUDE_SRC_THREAD_H_
 
 #include "chunk.h"
-#include "mesh.h"
 #include "pool.h"
 #include <stddef.h>
 #ifdef _WIN32
@@ -86,6 +85,14 @@ typedef struct {
 	atomic_size_t *upload_status;
 	MeshUploadData *upload_data;
 } MeshResourcePool;
+
+typedef struct {
+	// 	struct MeshSubQueue up;
+	// 	struct MeshSubQueue new;
+	Block *blockdata;
+	Chunk *involved;
+} MeshQueue;
+
 typedef struct {
 	ChunkPool *pool;
 	OGLPool *ogl_pool;

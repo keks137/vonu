@@ -22,14 +22,7 @@
 #include "oglpool.h"
 #include "thread.h"
 #include "mesh.h"
-
-#ifdef PROFILING
-#include "../vendor/spall.h"
-#include <linux/perf_event.h>
-#include <asm/unistd.h>
-#include <sys/mman.h>
-#include <immintrin.h>
-#endif //PROFILING
+#include "profiling.h"
 
 #include "shaders/vert2.c"
 #include "shaders/frag2.c"
@@ -106,15 +99,6 @@ uint64_t nanos_since_unspecified_epoch(void) // from nob.h
 #endif // _WIN32
 }
 
-typedef enum {
-	FACE_BACK = 0,
-	FACE_FRONT,
-	FACE_LEFT,
-	FACE_RIGHT,
-	FACE_BOTTOM,
-	FACE_TOP
-} CubeFace;
-
 static void print_blocklight(BlockLight light)
 {
 	VINFO("r: %u", light >> 8 * 3 & 0xFF);
@@ -167,22 +151,11 @@ static double get_clock_multiplier(void)
 	return multiplier;
 }
 
-static SpallProfile spall_ctx;
-static _Thread_local SpallBuffer spall_buffer;
 
 #define SPALL_BUFFER_SIZE (100 * 1024 * 1024)
 
-static uint64_t get_clock(void) {
-	return __rdtsc();
-}
-#define BEGIN_FUNC()                                                                                                \
-	do {                                                                                                        \
-		spall_buffer_begin(&spall_ctx, &spall_buffer, __FUNCTION__, sizeof(__FUNCTION__) - 1, get_clock()); \
-	} while (0)
-#define END_FUNC()                                                        \
-	do {                                                              \
-		spall_buffer_end(&spall_ctx, &spall_buffer, get_clock()); \
-	} while (0)
+SpallProfile spall_ctx;
+_Thread_local SpallBuffer spall_buffer;
 #endif // PROFILING
 /* #define FOR_CHUNKS_IN_RENDERDISTANCE(...)                                             \
 // 	for (int z = -RENDER_DISTANCE_Z; z <= RENDER_DISTANCE_Z; z++)                 \
@@ -221,100 +194,6 @@ typedef struct {
 
 GameState game_state = { 0 };
 
-typedef struct {
-	vec3 positions[VERTICES_PER_QUAD];
-	vec2 tex_coords[VERTICES_PER_QUAD];
-	uint8_t face_id;
-} CubeFaceDef;
-
-const CubeFaceDef cube_faces[FACES_PER_CUBE] = {
-	// BACK (z = -0.5)
-	{
-		.positions = {
-			{ 0.5f, 0.5f, -0.5f }, // Vertex 0 (index 0,5)
-			{ 0.5f, -0.5f, -0.5f }, // Vertex 1 (index 1)
-			{ -0.5f, -0.5f, -0.5f }, // Vertex 2 (index 2,3)
-			{ -0.5f, 0.5f, -0.5f } // Vertex 4 (index 4)
-		},
-		.tex_coords = {
-			{ 0.0f, 0.0f }, // From vertices 0,5
-			{ 0.0f, 1.0f }, // From vertex 1
-			{ 1.0f, 1.0f }, // From vertices 2,3
-			{ 1.0f, 0.0f } // From vertex 4
-		},
-		.face_id = FACE_BACK },
-	// FRONT face
-	{ .positions = {
-		  { -0.5f, -0.5f, 0.5f }, // Vertex 0
-		  { 0.5f, -0.5f, 0.5f }, // Vertex 1
-		  { 0.5f, 0.5f, 0.5f }, // Vertex 2,3
-		  { -0.5f, 0.5f, 0.5f } // Vertex 4
-	  },
-	  .tex_coords = {
-		  { 0.0f, 1.0f }, // From vertex 0
-		  { 1.0f, 1.0f }, // From vertex 1
-		  { 1.0f, 0.0f }, // From vertices 2,3
-		  { 0.0f, 0.0f } // From vertex 4
-	  },
-	  .face_id = FACE_FRONT },
-	// LEFT face
-	{ .positions = {
-		  { -0.5f, 0.5f, 0.5f }, // Vertex 0,5
-		  { -0.5f, 0.5f, -0.5f }, // Vertex 1
-		  { -0.5f, -0.5f, -0.5f }, // Vertex 2,3
-		  { -0.5f, -0.5f, 0.5f } // Vertex 4
-	  },
-	  .tex_coords = {
-		  { 1.0f, 0.0f }, // From vertices 0,5
-		  { 0.0f, 0.0f }, // From vertex 1
-		  { 0.0f, 1.0f }, // From vertices 2,3
-		  { 1.0f, 1.0f } // From vertex 4
-	  },
-	  .face_id = FACE_LEFT },
-	// RIGHT face
-	{ .positions = {
-		  { 0.5f, -0.5f, -0.5f }, // Vertex 0,5
-		  { 0.5f, 0.5f, -0.5f }, // Vertex 1
-		  { 0.5f, 0.5f, 0.5f }, // Vertex 2,3
-		  { 0.5f, -0.5f, 0.5f } // Vertex 4
-	  },
-	  .tex_coords = {
-		  { 1.0f, 1.0f }, // From vertices 0,5
-		  { 1.0f, 0.0f }, // From vertex 1
-		  { 0.0f, 0.0f }, // From vertices 2,3
-		  { 0.0f, 1.0f } // From vertex 4
-	  },
-	  .face_id = FACE_RIGHT },
-	// BOTTOM face
-	{ .positions = {
-		  { -0.5f, -0.5f, -0.5f }, // Vertex 0,5
-		  { 0.5f, -0.5f, -0.5f }, // Vertex 1
-		  { 0.5f, -0.5f, 0.5f }, // Vertex 2,3
-		  { -0.5f, -0.5f, 0.5f } // Vertex 4
-	  },
-	  .tex_coords = {
-		  { 1.0f, 0.0f }, // From vertices 0,5
-		  { 0.0f, 0.0f }, // From vertex 1
-		  { 0.0f, 1.0f }, // From vertices 2,3
-		  { 1.0f, 1.0f } // From vertex 4
-	  },
-	  .face_id = FACE_BOTTOM },
-	// TOP face
-	{ .positions = {
-		  { 0.5f, 0.5f, 0.5f }, // Vertex 0,5
-		  { 0.5f, 0.5f, -0.5f }, // Vertex 1
-		  { -0.5f, 0.5f, -0.5f }, // Vertex 2,3
-		  { -0.5f, 0.5f, 0.5f } // Vertex 4
-	  },
-	  .tex_coords = {
-		  { 1.0f, 1.0f }, // From vertices 0,5
-		  { 1.0f, 0.0f }, // From vertex 1
-		  { 0.0f, 0.0f }, // From vertices 2,3
-		  { 0.0f, 1.0f } // From vertex 4
-	  },
-	  .face_id = FACE_TOP }
-};
-
 // static const vec3 face_normals[6] = {
 // 	{ 0, 0, -1 }, // BACK
 // 	{ 0, 0, 1 }, // FRONT
@@ -323,10 +202,6 @@ const CubeFaceDef cube_faces[FACES_PER_CUBE] = {
 // 	{ 0, -1, 0 }, // BOTTOM
 // 	{ 0, 1, 0 } // TOP
 // };
-
-typedef struct {
-	Vertex vertices[VERTICES_PER_QUAD];
-} FaceVertices;
 
 float movement_speed = 5.0f;
 
@@ -405,6 +280,7 @@ static void window_focus_callback(GLFWwindow *window, int focused)
 
 static void process_input(GLFWwindow *window, Player *player)
 {
+	BEGIN_FUNC();
 	static bool escapeKeyPressedLastFrame = false;
 
 	bool escapeKeyPressedThisFrame = glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS;
@@ -423,6 +299,7 @@ static void process_input(GLFWwindow *window, Player *player)
 			set_paused(window, false);
 		}
 
+		END_FUNC();
 		return;
 	}
 
@@ -474,6 +351,7 @@ static void process_input(GLFWwindow *window, Player *player)
 	if (glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS) {
 		player->placing = true;
 	}
+	END_FUNC();
 }
 
 bool verify_shader(unsigned int shader, bool frag)
@@ -555,6 +433,9 @@ static void print_image_info(Image *image)
 	VINFO("n_chan: %zu", image->n_chan);
 }
 
+#ifdef NDEBUG
+#define GL_CHECK(stmt) (void)0
+#else
 #define GL_CHECK(stmt)                                                                                            \
 	do {                                                                                                      \
 		stmt;                                                                                             \
@@ -563,6 +444,7 @@ static void print_image_info(Image *image)
 			VERROR("OpenGL error 0x%04X at %s:%d: %s: %s", err, __FILE__, __LINE__, __func__, #stmt); \
 		}                                                                                                 \
 	} while (0)
+#endif // NDEBUG
 
 static void chunk_render(OGLPool *pool, Chunk *chunk, ShaderData shader_data)
 {
@@ -578,6 +460,7 @@ static void chunk_render(OGLPool *pool, Chunk *chunk, ShaderData shader_data)
 		return;
 	}
 
+	BEGIN_FUNC();
 	VASSERT_MSG(chunk->block_count != 0, "How did it get here?");
 	VASSERT_MSG(pool->items[chunk->oglpool_index].references > 0, "How did it get here?");
 	VASSERT_MSG(chunk->face_count > 0, "How did it get here?");
@@ -601,6 +484,7 @@ static void chunk_render(OGLPool *pool, Chunk *chunk, ShaderData shader_data)
 
 	GL_CHECK(glDrawElements(GL_TRIANGLES, index_count, GL_UNSIGNED_SHORT, 0));
 	// GL_CHECK(glDrawArrays(GL_TRIANGLES, 0, chunk->vertex_count));
+	END_FUNC();
 }
 
 static void vec3_assign(vec3 v, float x, float y, float z)
@@ -608,45 +492,6 @@ static void vec3_assign(vec3 v, float x, float y, float z)
 	v[0] = x;
 	v[1] = y;
 	v[2] = z;
-}
-#define TEXTURE_ATLAS_SIZE 256.0f
-#define TEXTURE_TILE_SIZE 16.0f
-
-typedef struct {
-	int tileX;
-	int tileY;
-} TextureCoords;
-
-static void get_tile_uv(int tileX, int tileY, float local_u, float local_v, float *u, float *v)
-{
-	const float epsilon = 0.5f / TEXTURE_TILE_SIZE;
-
-	float adjusted_u = local_u * (1.0f - 2 * epsilon) + epsilon;
-	float adjusted_v = local_v * (1.0f - 2 * epsilon) + epsilon;
-
-	float pixel_u = tileX * TEXTURE_TILE_SIZE + adjusted_u * TEXTURE_TILE_SIZE;
-	float pixel_v = tileY * TEXTURE_TILE_SIZE + adjusted_v * TEXTURE_TILE_SIZE;
-
-	*u = pixel_u / TEXTURE_ATLAS_SIZE;
-	*v = pixel_v / TEXTURE_ATLAS_SIZE;
-}
-
-static void texture_get_uv_vertex(float local_u, float local_v, BLOCKTYPE type, CubeFace face, float *u, float *v)
-{
-	static const TextureCoords texture_map[256][FACES_PER_CUBE] = {
-		[BlocktypeGrass] = {
-			[FACE_BACK] = { 1, 0 },
-			[FACE_FRONT] = { 1, 0 },
-			[FACE_LEFT] = { 1, 0 },
-			[FACE_RIGHT] = { 1, 0 },
-			[FACE_BOTTOM] = { 2, 0 },
-			[FACE_TOP] = { 0, 0 } },
-		[BlocktypeDirt] = { [FACE_BACK] = { 2, 0 }, [FACE_FRONT] = { 2, 0 }, [FACE_LEFT] = { 2, 0 }, [FACE_RIGHT] = { 2, 0 }, [FACE_BOTTOM] = { 2, 0 }, [FACE_TOP] = { 2, 0 } },
-		[BlocktypeStone] = { [FACE_BACK] = { 3, 0 }, [FACE_FRONT] = { 3, 0 }, [FACE_LEFT] = { 3, 0 }, [FACE_RIGHT] = { 3, 0 }, [FACE_BOTTOM] = { 3, 0 }, [FACE_TOP] = { 3, 0 } },
-	};
-
-	TextureCoords coords = texture_map[type][face];
-	get_tile_uv(coords.tileX, coords.tileY, local_u, local_v, u, v);
 }
 
 // const FaceVertices cube_vertices[] = {
@@ -671,13 +516,6 @@ static void texture_get_uv_vertex(float local_u, float local_v, BLOCKTYPE type, 
 // 	// TOP (normal: 0, 1, 0)
 // 	{ .vertices = { { { 0.5f, 0.5f, 0.5f }, { 1.0f, 1.0f }, FACE_TOP, 0 }, { { 0.5f, 0.5f, -0.5f }, { 1.0f, 0.0f }, FACE_TOP, 0 }, { { -0.5f, 0.5f, -0.5f }, { 0.0f, 0.0f }, FACE_TOP, 0 }, { { -0.5f, 0.5f, -0.5f }, { 0.0f, 0.0f }, FACE_TOP, 0 }, { { -0.5f, 0.5f, 0.5f }, { 0.0f, 1.0f }, FACE_TOP, 0 }, { { 0.5f, 0.5f, 0.5f }, { 1.0f, 1.0f }, FACE_TOP, 0 } } }
 // };
-
-static inline void const_vec3_copy(const vec3 a, vec3 dest)
-{
-	dest[0] = a[0];
-	dest[1] = a[1];
-	dest[2] = a[2];
-}
 
 static void print_block(Block *block)
 {
@@ -773,12 +611,14 @@ static void rendermap_keep_only_in_range(RenderMap *map, OGLPool *pool)
 
 static void rendermap_clean_maybe(RenderMap *map, OGLPool *pool)
 {
+	BEGIN_FUNC();
 	// if (map->count > 1.5f * MAX_VISIBLE_CHUNKS) {
 	// 	rendermap_keep_only_in_range(map, pool);
 	// }
 	if (map->count > 0.75f * map->table_size) {
 		rendermap_keep_only_in_range(map, pool);
 	}
+	END_FUNC();
 }
 
 static void player_update(Player *player)
@@ -803,6 +643,7 @@ typedef struct {
 
 static void world_render(World *world, ShaderData shader_data)
 {
+	BEGIN_FUNC();
 	// time_t current_time = time(NULL);
 	// if ((world->mesh.writei - world->mesh.readi) != 0)
 	// 	print_meshqueue(&world->mesh);
@@ -812,6 +653,7 @@ static void world_render(World *world, ShaderData shader_data)
 	for (int y = -RENDER_DISTANCE_Y; y <= RENDER_DISTANCE_Y; y++) {
 		for (int z = -RENDER_DISTANCE_Z; z <= RENDER_DISTANCE_Z; z++) {
 			for (int x = -RENDER_DISTANCE_X; x <= RENDER_DISTANCE_X; x++) {
+				// BEGIN_SECT("render one chunk");
 				ChunkCoord coord = {
 					world->player.chunk_pos.x + x,
 					world->player.chunk_pos.y + y,
@@ -822,12 +664,14 @@ static void world_render(World *world, ShaderData shader_data)
 					// VINFO("hi");
 					chunk_render(&world->ogl_pool, &chunk, shader_data);
 				}
+				// END_SECT("render one chunk");
 			}
 		}
 	}
 
 	// ChunkCoord player_chunk = world_coord_to_chunk(world->player.pos);
 	// VINFO("Player coords: %i %i %i", player_chunk.x, player_chunk.y, player_chunk.z);
+	END_FUNC();
 }
 
 typedef struct {
@@ -876,83 +720,6 @@ static void player_place_block(Player *player, BLOCKTYPE blocktype, ChunkPool *p
 	// pool_replace_block(pool, ogl, map, &(WorldCoord){ 0, -10, 0 }, block, seed);
 	// player_print_block(player, ogl, map, pool, seed);
 }
-static inline bool blockpos_within_chunk(BlockPos *block_pos)
-{
-	return block_pos->x >= 0 && block_pos->x < CHUNK_TOTAL_X && block_pos->z >= 0 && block_pos->z < CHUNK_TOTAL_Z && block_pos->y >= 0 && block_pos->y < CHUNK_TOTAL_Y;
-}
-static inline Block chunk_blockpos_at(const Chunk *chunk, const BlockPos *pos)
-{
-	return chunk->data[CHUNK_INDEX(pos->x, pos->y, pos->z)];
-}
-
-// void meshqueue_init(MeshQueue *mesh, size_t up_cap, size_t new_cap)
-// {
-// VASSERT(is_power_of_two(up_cap));
-// VASSERT(is_power_of_two(new_cap));
-// mesh->up.mask = up_cap - 1;
-// mesh->up.chunks = calloc(up_cap, sizeof(mesh->up.chunks[0]));
-// VASSERT_RELEASE_MSG(mesh->up.chunks != NULL, "Buy more RAM");
-// mesh->new.chunks = calloc(new_cap, sizeof(mesh->new.chunks[0]));
-// VASSERT_RELEASE_MSG(mesh->new.chunks != NULL, "Buy more RAM");
-// mesh->blockdata = calloc(MESH_CHUNKS_INVOLVED * CHUNK_TOTAL_BLOCKS, sizeof(mesh->blockdata[0]));
-// VASSERT_RELEASE_MSG(mesh->blockdata != NULL, "Buy more RAM");
-// mesh->involved = calloc(MESH_CHUNKS_INVOLVED * CHUNK_TOTAL_BLOCKS, sizeof(mesh->involved[0]));
-// VASSERT_RELEASE_MSG(mesh->blockdata != NULL, "Buy more RAM");
-//
-// for (size_t i = 0; i < MESH_CHUNKS_INVOLVED; i++) {
-// 	Chunk chunk = { 0 };
-// 	chunk.data = mesh->blockdata + i * CHUNK_TOTAL_BLOCKS;
-// 	mesh->involved[i] = chunk;
-// }
-// }
-//
-// void meshqueue_add_update(MeshQueue *mesh, const ChunkCoord coord)
-// {
-// 	if (mesh->up.writei - mesh->up.readi > mesh->up.mask)
-//
-// 		mesh->up.readi = mesh->up.writei - mesh->up.mask;
-//
-// 	mesh->up.chunks[mesh->up.writei & mesh->up.mask] = coord;
-// 	mesh->up.writei++;
-// }
-//
-// void meshqueue_add_new(MeshQueue *mesh, const ChunkCoord coord)
-// {
-// 	if (mesh->new.writei - mesh->new.readi > mesh->new.mask)
-// 		mesh->new.readi = mesh->new.writei - mesh->new.mask;
-//
-// 	mesh->new.chunks[mesh->new.writei & mesh->new.mask] = coord;
-// 	mesh->new.writei++;
-// }
-//
-// bool meshqueue_get_up(MeshQueue *mesh, ChunkCoord *coord)
-// {
-// 	if (mesh->up.readi == mesh->up.writei)
-// 		return false;
-// 	*coord = mesh->up.chunks[mesh->up.readi & mesh->up.mask];
-// 	mesh->up.readi++;
-// 	return true;
-// }
-//
-// bool meshqueue_get_new(MeshQueue *mesh, ChunkCoord *coord)
-// {
-// 	if (mesh->new.readi == mesh->new.writei)
-// 		return false;
-// 	*coord = mesh->new.chunks[mesh->new.readi & mesh->new.mask];
-// 	mesh->new.readi++;
-// 	return true;
-// }
-//
-// bool meshqueue_get(MeshQueue *mesh, ChunkCoord *coord)
-// {
-// 	if (meshqueue_get_up(mesh, coord))
-// 		return true;
-// 	if (meshqueue_get_new(mesh, coord))
-// 		return true;
-//
-// 	return false;
-// }
-
 static void workers_add_update(ThreadPool *thread, const ChunkCoord coord)
 {
 	// VINFO("%i", thread->system.mesh_up.writepos - thread->system.mesh_up.readpos);
@@ -964,83 +731,22 @@ static void workers_add_new(ThreadPool *thread, const ChunkCoord coord)
 }
 static void mesh_request(RenderMap *map, ThreadPool *thread, const ChunkCoord *coord)
 {
+	BEGIN_FUNC();
 	Chunk chunk = { 0 };
 	// TODO: make this scream into the void again
 	if (rendermap_get_chunk(map, &chunk, coord)) {
 		// print_chunk(&chunk);
-		if (chunk.up_to_date)
+		if (chunk.up_to_date) {
+			END_FUNC();
 			return;
+		}
 		workers_add_update(thread, *coord);
+		END_FUNC();
+
 		return;
 	}
 	workers_add_new(thread, *coord);
-}
-
-static void mesh_add_face(ChunkVertsScratch *buffer, const BlockPos *pos, BLOCKTYPE type, CubeFace face, BlockLight light)
-{
-	// FaceVertices face_verts = cube_vertices[face];
-	const CubeFaceDef *face_def = &cube_faces[face];
-
-	VASSERT_MSG(buffer->lvl + sizeof(FaceVertices) / sizeof(Vertex) <= buffer->cap, "Vertex buffer overflow!");
-	for (size_t i = 0; i < VERTICES_PER_QUAD; i++) {
-		Vertex vertex = { 0 };
-
-		const_vec3_copy(face_def->positions[i], vertex.pos);
-		// vertex.pos[0] +=  (float)x;
-		// vertex.pos[1] +=  (float)y;
-		// vertex.pos[2] +=  (float)z;
-		vertex.pos[0] += 0.5f + (float)pos->x;
-		vertex.pos[1] += 0.5f + (float)pos->y;
-		vertex.pos[2] += 0.5f + (float)pos->z;
-
-		texture_get_uv_vertex(face_def->tex_coords[i][0],
-				      face_def->tex_coords[i][1],
-				      type, face, &vertex.tex[0], &vertex.tex[1]);
-
-		vertex.norm |= face & 0x07;
-		vertex.light = light;
-		buffer->data[buffer->lvl++] = vertex;
-	}
-}
-
-static inline Block meshqueue_block_at(MeshQueue *mesh, BlockPos *pos)
-{
-	int64_t cx = 0;
-	int64_t cy = 0;
-	int64_t cz = 0;
-
-	if (pos->x < 0) {
-		cx = -1;
-	} else if (pos->x >= CHUNK_TOTAL_X) {
-		cx = 1;
-	}
-
-	if (pos->y < 0) {
-		cy = -1;
-	} else if (pos->y >= CHUNK_TOTAL_Y) {
-		cy = 1;
-	}
-
-	if (pos->z < 0) {
-		cz = -1;
-	} else if (pos->z >= CHUNK_TOTAL_Z) {
-		cz = 1;
-	}
-
-	size_t chunk_index = (cy + 1) * MESH_INVOLVED_STRIDE_Y + (cz + 1) * MESH_INVOLVED_STRIDE_Z + (cx + 1);
-
-	int64_t lx = pos->x - cx * CHUNK_TOTAL_X;
-	int64_t ly = pos->y - cy * CHUNK_TOTAL_Y;
-	int64_t lz = pos->z - cz * CHUNK_TOTAL_Z;
-
-	VASSERT((lx >= 0 && lx < CHUNK_TOTAL_X &&
-		 ly >= 0 && ly < CHUNK_TOTAL_Y &&
-		 lz >= 0 && lz < CHUNK_TOTAL_Z));
-
-	size_t block_index_in_chunk = (ly * CHUNK_TOTAL_X + lz) * CHUNK_TOTAL_X + lx;
-
-	size_t involved_index = chunk_index * CHUNK_TOTAL_BLOCKS + block_index_in_chunk;
-	return mesh->blockdata[involved_index];
+	END_FUNC();
 }
 
 static void print_blockpos(const BlockPos *pos)
@@ -1050,45 +756,6 @@ static void print_blockpos(const BlockPos *pos)
 static void print_chunkcoord(const ChunkCoord *pos)
 {
 	VINFO("ChunkCoord: x: %i y: %i z: %i", pos->x, pos->y, pos->z);
-}
-static void mesh_add_block(MeshQueue *mesh, const BlockPos *pos, const Chunk *chunk, ChunkVertsScratch *scratch)
-{
-	static const vec3 face_offsets[FACES_PER_CUBE] = {
-		{ 0, 0, -1 },
-		{ 0, 0, 1 },
-		{ -1, 0, 0 },
-		{ 1, 0, 0 },
-		{ 0, -1, 0 },
-		{ 0, 1, 0 }
-	};
-
-	Block block = chunk_blockpos_at(chunk, pos);
-	BlockLight light = block.light;
-	if (!block.obstructing)
-		return;
-
-	for (CubeFace face = FACE_BACK; face <= FACE_TOP; face++) {
-		BlockPos neighbour_pos = { 0 };
-		neighbour_pos.x = pos->x + face_offsets[face][0];
-		neighbour_pos.y = pos->y + face_offsets[face][1];
-		neighbour_pos.z = pos->z + face_offsets[face][2];
-
-		Block neighbor = { 0 };
-		if (blockpos_within_chunk(&neighbour_pos))
-			neighbor = chunk_blockpos_at(chunk, &neighbour_pos);
-		else {
-			// TODO: rethink this, it's broken
-			neighbor = meshqueue_block_at(mesh, &neighbour_pos);
-			// if (neighbor.obstructing) {
-			// 	print_chunkcoord(&chunk->coord);
-			// 	print_blockpos(&neighbour_pos);
-			// 	print_block(&neighbor);
-			// }
-		}
-		if (!neighbor.obstructing) {
-			mesh_add_face(scratch, pos, block.type, face, light);
-		}
-	}
 }
 
 static void meshqueue_chunk_load(ChunkPool *pool, Chunk *chunk, const ChunkCoord *coord, size_t seed)
@@ -1153,6 +820,7 @@ static inline void meshqueue_process_element(MeshUploadData *upd, RenderMap *map
 }
 void meshqueue_process(size_t max, MeshResourcePool *meshp, RenderMap *map, OGLPool *ogl)
 {
+	BEGIN_FUNC();
 	size_t num_proc = 0;
 	for (size_t i = 0; i < meshp->max_uploads && num_proc < max; i++) {
 		if (meshp->upload_status[i] == UPLOAD_STATUS_READY) {
@@ -1165,14 +833,17 @@ void meshqueue_process(size_t max, MeshResourcePool *meshp, RenderMap *map, OGLP
 		}
 		// VINFO("num_proc: %zu",num_proc);
 	}
+	END_FUNC();
 }
 
 static void world_update(World *world)
 {
+	BEGIN_FUNC();
 	rendermap_clean_maybe(&world->render_map, &world->ogl_pool);
 	// VINFO("c: %i", world->render_map.count);
 	// VINFO("d: %i", world->render_map.deleted_count);
 
+	BEGIN_SECT("chunk pool");
 	for (size_t i = 0; i < world->pool.lvl; i++) {
 		Chunk *chunk = &world->pool.chunk[i];
 		// if (world->pool.chunk[i].up_to_date) {
@@ -1192,7 +863,9 @@ static void world_update(World *world)
 		}
 		chunk->cycles_in_pool++;
 	}
+	END_SECT("chunk pool");
 
+	BEGIN_SECT("render req");
 	for (int y = RENDER_DISTANCE_Y; y > -RENDER_DISTANCE_Y; y--) {
 		for (int z = -RENDER_DISTANCE_Z; z <= RENDER_DISTANCE_Z; z++) {
 			for (int x = -RENDER_DISTANCE_X; x <= RENDER_DISTANCE_X; x++) {
@@ -1206,10 +879,13 @@ static void world_update(World *world)
 			}
 		}
 	}
+	END_SECT("render req");
+	END_FUNC();
 }
 static void render(GameState *game_state, WindowData window, ShaderData shader_data)
 {
-	BEGIN_FUNC();
+	// BEGIN_FUNC();
+	BEGIN_SECT("Other Stuff");
 	mat4 view;
 	vec3 camera_pos_plus_front;
 	Camera *camera = &game_state->world.player.camera;
@@ -1229,11 +905,17 @@ static void render(GameState *game_state, WindowData window, ShaderData shader_d
 	glUniformMatrix4fv(shader_data.view_loc, 1, GL_FALSE, (const float *)view);
 	glUniformMatrix4fv(shader_data.projection_loc, 1, GL_FALSE, (const float *)projection);
 
+	END_SECT("Other Stuff");
 	world_render(&game_state->world, shader_data);
 
+	BEGIN_SECT("Buffer Swap");
 	glfwSwapBuffers(window.glfw);
+	END_SECT("Buffer Swap");
+	BEGIN_SECT("Poll Events");
 	glfwPollEvents();
+	END_SECT("Poll Events");
 	GL_CHECK((void)0);
+	// END_FUNC();
 }
 
 static void glfw_init(WindowData *window, int width, int height)
@@ -1258,7 +940,7 @@ static void glfw_init(WindowData *window, int width, int height)
 	glfwSetFramebufferSizeCallback(window->glfw, framebuffer_size_callback);
 	glfwSetInputMode(window->glfw, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
 	glfwSetWindowFocusCallback(window->glfw, window_focus_callback);
-	// glfwSwapInterval(0); // no vsync
+	glfwSwapInterval(0); // no vsync
 }
 
 static void ogl_init(unsigned int *texture)
@@ -1440,12 +1122,6 @@ static void meshresourcepool_init(MeshResourcePool *pool, size_t max_users, size
 	}
 }
 
-typedef size_t MeshUserIndex;
-typedef size_t MeshUploadIndex;
-typedef struct {
-	MeshUserIndex user;
-	MeshUploadIndex up;
-} MeshResourceHandle;
 bool meshuser_try_acquire(MeshResourcePool *pool, MeshUserIndex *index)
 {
 	for (MeshUserIndex i = 0; i < pool->max_users; i++) {
@@ -1470,85 +1146,13 @@ bool meshupload_try_acquire(MeshResourcePool *pool, MeshUploadIndex *index)
 	return false;
 }
 
-static void meshworker_chunk_load(ChunkPool *pool, Chunk *chunk, const ChunkCoord *coord, size_t seed)
-{
-	// TODO: cache
-	// TODO: pull latest from pool
-	chunk->last_used = time(NULL);
-	chunk->coord = *coord;
-	VASSERT(chunk->data != NULL);
-	size_t index;
-	if (pool_get_index(pool, chunk, &index)) {
-		memcpy(chunk->data, pool->chunk[index].data, sizeof(chunk->data[0]) * CHUNK_TOTAL_BLOCKS);
-		chunk->block_count = pool->chunk[index].block_count;
-		// VINFO("count: %zu", chunk->block_count);
-		return;
-	}
-	chunk_generate_terrain(chunk, seed);
-}
 
 static void light_propagate()
 {
 }
-static void mesh_compute(MeshQueue *mesh, ChunkPool *pool, ChunkVertsScratch *scratch, const ChunkCoord *coord, size_t seed)
-{
-	Chunk *wanted = &mesh->involved[MESH_INVOLVED_CENTRE];
-	VASSERT(wanted->block_count > 0);
-	size_t i = 0;
-	for (int64_t y = coord->y - 1; y <= coord->y + 1; y++)
-		for (int64_t z = coord->z - 1; z <= coord->z + 1; z++)
-			for (int64_t x = coord->x - 1; x <= coord->x + 1; x++) {
-				if (i == MESH_INVOLVED_CENTRE) { // already loaded
-					i++;
-					continue;
-				}
-				memset(mesh->involved[i].data, 0, sizeof(Block) * CHUNK_TOTAL_BLOCKS);
-				chunk_clear_metadata(&mesh->involved[i]);
-				meshworker_chunk_load(pool, &mesh->involved[i], coord, seed);
-				i++;
-			}
 
-	for (size_t y = 0; y < CHUNK_TOTAL_Y; y++) {
-		for (size_t z = 0; z < CHUNK_TOTAL_Z; z++) {
-			for (size_t x = 0; x < CHUNK_TOTAL_X; x++) {
-				Block *block = &wanted->data[CHUNK_INDEX(x, y, z)];
-				// chunk->data[CHUNK_INDEX(x, y, z)];
-				if (!block->obstructing)
-					continue;
-				BlockPos pos = { .x = x, .y = y, .z = z };
 
-				mesh_add_block(mesh, &pos, wanted, scratch);
-			}
-		}
-	}
-}
 
-static void meshworker_process_mesh(Worker *worker, MeshResourcePool *pool, MeshResourceHandle *res, WorkerTask *task)
-{
-	// VINFO("%i %i %i", task->coord.x, task->coord.y, task->coord.z);
-	MeshUploadData *upd = &pool->upload_data[res->up];
-	clear_chunk_verts_scratch(&upd->buf);
-	MeshQueue mesh = { 0 };
-	mesh.involved = &pool->involved[res->user * MESH_CHUNKS_INVOLVED];
-	mesh.blockdata = &pool->blockdata[res->user * MESH_CHUNKS_INVOLVED * CHUNK_TOTAL_BLOCKS];
-	// VINFO("involved: %p", pool->involved);
-
-	Chunk *wanted = &mesh.involved[MESH_INVOLVED_CENTRE];
-	// VINFO("wanted: %p", wanted);
-	// VINFO("data: %p", wanted->data);
-	memset(wanted->data, 0, sizeof(Block) * CHUNK_TOTAL_BLOCKS);
-	chunk_clear_metadata(wanted);
-	meshworker_chunk_load(worker->context.pool, wanted, &task->coord, worker->context.seed);
-	wanted->up_to_date = true;
-	upd->coord = wanted->coord;
-	upd->block_count = wanted->block_count;
-	if (wanted->block_count > 0) {
-		mesh_compute(&mesh, worker->context.pool, &upd->buf, &task->coord, worker->context.seed);
-		if (upd->buf.lvl == 0)
-			VWARN("huh? bc: %zu x: %i y: %i z: %i", wanted->block_count, task->coord.x, task->coord.y, task->coord.z);
-	}
-	pool->upload_status[res->up] = UPLOAD_STATUS_READY;
-}
 
 bool running;
 
@@ -1558,6 +1162,17 @@ DWORD WINAPI threads_main(LPVOID arg)
 static void *threads_main(void *arg)
 #endif
 {
+#ifdef PROFILING
+	uint8_t *spall_buffer_data = calloc(1, SPALL_BUFFER_SIZE);
+	spall_buffer = (SpallBuffer){
+		.pid = 0,
+		.tid = (uint32_t)(uint64_t)pthread_self(),
+		.length = SPALL_BUFFER_SIZE,
+		.data = spall_buffer_data,
+	};
+	memset(spall_buffer.data, 1, spall_buffer.length);
+	spall_buffer_init(&spall_ctx, &spall_buffer);
+#endif // PROFILING
 	Worker *worker = (Worker *)arg;
 	WorkerContext *ctx = &worker->context;
 	MeshResourcePool *meshres = ctx->mesh_resource;
@@ -1590,6 +1205,11 @@ static void *threads_main(void *arg)
 		} else
 			snooze(1);
 	}
+
+#ifdef PROFILING
+	spall_buffer_quit(&spall_ctx, &spall_buffer);
+#endif // PROFILING
+
 	return 0;
 }
 bool thread_create(Worker *worker)
@@ -1814,6 +1434,7 @@ int main()
 
 	Player *player = &world->player;
 	while (!glfwWindowShouldClose(window.glfw)) {
+		BEGIN_SECT("main loop");
 		float current_frame = glfwGetTime();
 		game_state.delta_time = current_frame - game_state.last_frame;
 		game_state.last_frame = current_frame;
@@ -1825,10 +1446,12 @@ int main()
 		if (game_state.paused) {
 			glfwWaitEvents();
 			threadpool_pause(&world->thread);
+			END_SECT("main loop");
 			continue;
 		}
 		threadpool_resume(&world->thread);
 
+		BEGIN_SECT("Bin search");
 		player_update(player);
 
 		if (player->breaking) {
@@ -1839,14 +1462,21 @@ int main()
 			player_place_block(player, BlocktypeStone, &game_state.world.pool, &game_state.world.ogl_pool, &game_state.world.render_map, &player->pos, world->seed);
 			player->placing = false;
 		}
+		END_SECT("Bin search");
 		world_update(world);
 
 		render(&game_state, window, shader_data);
+
+		END_SECT("main loop");
+#ifdef PROFILING
+		spall_buffer_flush(&spall_ctx, &spall_buffer);
+#endif // PROFILING
 	}
 	running = false;
 	threadpool_cleanup(&world->thread);
 
 #ifdef PROFILING
+	spall_buffer_quit(&spall_ctx, &spall_buffer);
 	spall_quit(&spall_ctx);
 #endif //PROFILING
 

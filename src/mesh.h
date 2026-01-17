@@ -5,6 +5,7 @@
 #include "map.h"
 #include "map.h"
 #include "pool.h"
+#include "thread.h"
 #include <stddef.h>
 
 struct MeshSubQueue {
@@ -19,12 +20,13 @@ struct MeshSubQueue {
 #define MESH_INVOLVED_STRIDE_Y 9
 #define MESH_INVOLVED_STRIDE_Z 3
 
+typedef size_t MeshUserIndex;
+typedef size_t MeshUploadIndex;
+
 typedef struct {
-	// 	struct MeshSubQueue up;
-	// 	struct MeshSubQueue new;
-	Block *blockdata;
-	Chunk *involved;
-} MeshQueue;
+	MeshUserIndex user;
+	MeshUploadIndex up;
+} MeshResourceHandle;
 
-
+void meshworker_process_mesh(Worker *worker, MeshResourcePool *pool, MeshResourceHandle *res, WorkerTask *task);
 #endif // INCLUDE_SRC_MESH_H_

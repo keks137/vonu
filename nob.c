@@ -11,6 +11,7 @@ void append_source_files(Nob_Cmd *cmd)
 	nob_cc_inputs(cmd, SRC_DIR "main.c");
 	nob_cc_inputs(cmd, SRC_DIR "oglpool.c");
 	nob_cc_inputs(cmd, SRC_DIR "disk.c");
+	nob_cc_inputs(cmd, SRC_DIR "mesh.c");
 	nob_cc_inputs(cmd, SRC_DIR "pool.c");
 	nob_cc_inputs(cmd, SRC_DIR "chunk.c");
 	nob_cc_inputs(cmd, SRC_DIR "block.c");
