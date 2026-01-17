@@ -13,12 +13,14 @@ cl nob.c
 nob
 bin\vonu
 ```
-Note: your working directory has to be the one with the assets in it
+Note: when running the application, your working directory has to be the one with the assets in it
 
 ## GCC/Clang <a id="building-gcc-clang"></a>
 
+Note: first line is only needed once, the build system rebuilds itself after
 ```bash
-cc nob.c -o nob # this line is only needed once, the build system rebuilds itself after
+cc nob.c -o nob
 ./nob
-./bin/vonu # your working directory has to be the one with the assets in it
+./bin/vonu 
 ```
+Note: when running the application, your working directory has to be the one with the assets in it
