@@ -7,11 +7,13 @@ Relies on Monolithic Unit Tests
 
 # Building <a id="building"></a>
 ## MSVC <a id="building-msvc"></a>
+Note: first line is only needed once, the build system rebuilds itself after
 ```cmd
-cl nob.c # this line is only needed once, the build system rebuilds itself after
+cl nob.c
 nob
-bin\vonu # your working directory has to be the one with the assets in it
+bin\vonu
 ```
+Note: your working directory has to be the one with the assets in it
 
 ## GCC/Clang <a id="building-gcc-clang"></a>
 
