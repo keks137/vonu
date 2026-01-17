@@ -5,7 +5,11 @@ bin
 compile_commands.json
 nob
 nob.old
+nob.exe.old
 flamegraph.svg
 perf.data
 perf.data.old
+**.exe
+**.obj
+**.pdb
 
