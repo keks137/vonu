@@ -112,11 +112,15 @@ bool msvc_build(Nob_Cmd *cmd)
 	nob_cmd_append(cmd, "/W4");
 	nob_cmd_append(cmd, "/O2");
 	// nob_cmd_append(cmd, "/Zi");
-	nob_cmd_append(cmd, "/I" "./vendor");
+	nob_cmd_append(cmd, "/I"
+			    "./vendor");
 	append_source_files(cmd);
 	nob_cmd_append(cmd, "vendor/rglfw.c");
 	nob_cmd_append(cmd, "/Fe:bin/vonu.exe");
-	nob_cmd_append(cmd, "/link gdi32.lib user32.lib shell32.lib ");
+	nob_cmd_append(cmd, "/link");
+	nob_cmd_append(cmd, "gdi32.lib");
+	nob_cmd_append(cmd, "user32.lib");
+	nob_cmd_append(cmd, "shell32.lib");
 	if (!nob_cmd_run(cmd))
 		return false;
 	return true;
