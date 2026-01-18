@@ -216,42 +216,6 @@ typedef struct {
 } MouseState;
 MouseState mouse_state;
 
-static void mouse_callback(GLFWwindow *window, double xpos, double ypos)
-{
-	if (game_state.paused)
-		return;
-	(void)window;
-	if (mouse_state.reset_mouse) {
-		last_x = xpos;
-		last_y = ypos;
-		mouse_state.reset_mouse = false;
-	}
-
-	float xoffset = xpos - last_x;
-	float yoffset = last_y - ypos;
-	last_x = xpos;
-	last_y = ypos;
-
-	const float sensitivity = 0.1f;
-	xoffset *= sensitivity;
-	yoffset *= sensitivity;
-
-	Camera *camera = &game_state.world.player.camera;
-	camera->yaw += xoffset;
-	camera->pitch += yoffset;
-
-	if (camera->pitch > 89.0f)
-		camera->pitch = 89.0f;
-	if (camera->pitch < -89.0f)
-		camera->pitch = -89.0f;
-	vec3 direction = { 0 };
-
-	direction[0] = cos(glm_rad(camera->yaw)) * cos(glm_rad(camera->pitch));
-	direction[1] = sin(glm_rad(camera->pitch));
-	direction[2] = sin(glm_rad(camera->yaw)) * cos(glm_rad(camera->pitch));
-	glm_normalize(direction);
-	glm_vec3_copy(direction, camera->front);
-}
 static void framebuffer_size_callback(GLFWwindow *window, int width, int height)
 {
 	(void)window;
@@ -281,6 +245,9 @@ static void process_input(GLFWwindow *window, Player *player)
 {
 	BEGIN_FUNC();
 	static bool escapeKeyPressedLastFrame = false;
+	static double last_x = 400;
+	static double last_y = 300;
+	static bool reset_mouse = true;
 
 	bool escapeKeyPressedThisFrame = glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS;
 
@@ -301,8 +268,37 @@ static void process_input(GLFWwindow *window, Player *player)
 		END_FUNC();
 		return;
 	}
+	double xpos, ypos;
+	glfwGetCursorPos(window, &xpos, &ypos);
+	if (reset_mouse) {
+		last_x = xpos;
+		last_y = ypos;
+		reset_mouse = false;
+	}
 
 	Camera *camera = &player->camera;
+
+	float xoffset = (xpos - last_x) * 0.1f;
+	float yoffset = (last_y - ypos) * 0.1f;
+	last_x = xpos;
+	last_y = ypos;
+
+	camera->yaw += xoffset;
+	camera->pitch += yoffset;
+
+	if (camera->pitch > 89.0f)
+		camera->pitch = 89.0f;
+	if (camera->pitch < -89.0f)
+		camera->pitch = -89.0f;
+
+	vec3 direction = {
+		cos(glm_rad(camera->yaw)) * cos(glm_rad(camera->pitch)),
+		sin(glm_rad(camera->pitch)),
+		sin(glm_rad(camera->yaw)) * cos(glm_rad(camera->pitch))
+	};
+	glm_normalize(direction);
+	glm_vec3_copy(direction, camera->front);
+
 	const float camera_speed = movement_speed * game_state.delta_time;
 	if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS) {
 		camera->pos[1] += camera_speed;
@@ -941,7 +937,7 @@ static void glfw_init(WindowData *window, int width, int height)
 	}
 
 	glfwMakeContextCurrent(window->glfw);
-	glfwSetCursorPosCallback(window->glfw, mouse_callback);
+	// glfwSetCursorPosCallback(window->glfw, mouse_callback);
 	glfwSetFramebufferSizeCallback(window->glfw, framebuffer_size_callback);
 	glfwSetInputMode(window->glfw, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
 	glfwSetWindowFocusCallback(window->glfw, window_focus_callback);
@@ -1292,7 +1288,7 @@ void threadpool_init(ThreadPool *thread, size_t num_workers, ChunkPool *pool, OG
 {
 	thread->num = num_workers;
 	if (thread->num == 0)
-		thread->num = get_max_threads() - 1;
+		thread->num = get_max_threads() - 2; // Exclude main and input
 	thread->workers = calloc(thread->num, sizeof(thread->workers[0]));
 	VASSERT_RELEASE_MSG(thread->workers != NULL, "Buy more RAM");
 
