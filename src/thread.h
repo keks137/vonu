@@ -109,6 +109,41 @@ typedef struct {
 	uint64_t id;
 	volatile bool running;
 } Worker;
+
+typedef enum {
+	INPUT_EVENT_MOUSE_MOVE,
+	INPUT_EVENT_MOUSE_BTN,
+	INPUT_EVENT_KEY
+} InputEventType;
+
+typedef struct {
+	InputEventType type;
+	union {
+		struct {
+			int32_t dx, dy;
+		} mouse_move;
+		struct {
+			uint32_t btn;
+			bool down;
+		} mouse_btn;
+		struct {
+			uint32_t code;
+			bool down;
+		} key;
+	};
+} InputEvent;
+
+typedef struct {
+	InputEvent *events;
+	size_t cap;
+	atomic_size_t writepos;
+	atomic_size_t readpos;
+} InputRing;
+typedef struct {
+	Thread handle;
+	InputRing *ring;
+	volatile bool running;
+} InputWorker;
 typedef struct {
 	WorkerContext shared_context;
 	size_t num;

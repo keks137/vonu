@@ -632,6 +632,8 @@ typedef struct {
 	GLFWwindow *glfw;
 	int width;
 	int height;
+	InputWorker *worker;
+	InputRing ring;
 } WindowData;
 
 // void print_meshqueue(MeshQueue *mesh)
@@ -937,7 +939,6 @@ static void glfw_init(WindowData *window, int width, int height)
 	}
 
 	glfwMakeContextCurrent(window->glfw);
-	// glfwSetCursorPosCallback(window->glfw, mouse_callback);
 	glfwSetFramebufferSizeCallback(window->glfw, framebuffer_size_callback);
 	glfwSetInputMode(window->glfw, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
 	glfwSetWindowFocusCallback(window->glfw, window_focus_callback);
@@ -1288,7 +1289,10 @@ void threadpool_init(ThreadPool *thread, size_t num_workers, ChunkPool *pool, OG
 {
 	thread->num = num_workers;
 	if (thread->num == 0)
-		thread->num = get_max_threads() - 2; // Exclude main and input
+		thread->num = get_max_threads() - 2; // NOTE: not sure if should exclude main and input
+	if (thread->num <= 0)
+		thread->num = 1; // fallback to keep logic working
+
 	thread->workers = calloc(thread->num, sizeof(thread->workers[0]));
 	VASSERT_RELEASE_MSG(thread->workers != NULL, "Buy more RAM");
 
@@ -1377,6 +1381,78 @@ void threadpool_cleanup(ThreadPool *thread)
 	// free(thread->system.mesh_new.tasks);
 }
 
+#ifdef _WIN32
+static DWORD WINAPI input_thread_func(void *arg)
+{
+	InputSystem *input = arg;
+	RAWINPUTDEVICE rid = { 0x01, 0x06, 0, glfwGetWin32Window(input->window) };
+	RegisterRawInputDevices(&rid, 1, sizeof(rid));
+	RAWINPUT raw;
+	UINT sz = sizeof(raw);
+
+	while (input->running) {
+		MSG msg;
+		while (PeekMessage(&msg, NULL, WM_INPUT, WM_INPUT, PM_REMOVE)) {
+			GetRawInputData((HRAWINPUT)msg.lParam, RID_INPUT, &raw, &sz, sizeof(RAWINPUTHEADER));
+			if (raw.data.mouse.usFlags & MOUSE_MOVE_RELATIVE) {
+				size_t i = atomic_fetch_add(&input->ring.writepos, 1) % input->ring.capacity;
+				input->ring.events[i] = (InputEvent){ .type = 0, .mouse_move = { raw.data.mouse.lLastX, raw.data.mouse.lLastY } };
+			}
+		}
+		snooze(1);
+	}
+	return 0;
+}
+#else
+#include <fcntl.h>
+static void *input_thread_func(void *arg)
+{
+	InputWorker *worker = (InputWorker *)arg;
+	int fd = open("/dev/input/mice", O_RDONLY | O_NONBLOCK);
+	if (fd < 0) {
+		VERROR("Couldn't get inputs to open");
+		return 0;
+	}
+	signed char data[3];
+
+	while (running) {
+		while (read(fd, data, 3) == 3) {
+			size_t i = atomic_fetch_add(&worker->ring->writepos, 1) % worker->ring->cap;
+			worker->ring->events[i] = (InputEvent){
+				.type = INPUT_EVENT_MOUSE_MOVE,
+				.mouse_move = { data[1], -data[2] }
+			};
+		}
+		snooze(1);
+	}
+	close(fd);
+	return 0;
+}
+#endif
+
+static bool input_thread_create(InputWorker *worker)
+{
+#ifdef _WIN32
+	worker->handle = CreateThread(NULL, 0, input_thread_func, worker, 0, NULL);
+	return worker->handle != NULL;
+#else
+	return pthread_create(&worker->handle, NULL, input_thread_func, worker) == 0;
+#endif
+}
+
+static void input_ring_init(InputRing *ring, size_t cap)
+{
+	ring->cap = cap;
+	ring->events = calloc(ring->cap, sizeof(ring->events[0]));
+	VASSERT_RELEASE_MSG(ring->events != NULL, "Buy more RAM");
+}
+
+static void input_system_init(WindowData *window)
+{
+	VASSERT(window->worker == NULL);
+	input_ring_init(&window->ring, 4096);
+}
+
 int main()
 {
 #ifdef PROFILING
@@ -1397,6 +1473,7 @@ int main()
 	VINFO("%zu", sizeof(BLOCKTYPE));
 	WindowData window = { 0 };
 	glfw_init(&window, 1600, 900);
+	// input_system_init(&window); // TODO: consider if wanted
 	// glfw_init(&window, 1920, 1080);
 	unsigned int texture;
 	ogl_init(&texture);
