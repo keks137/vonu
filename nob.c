@@ -15,6 +15,7 @@ void append_source_files(Nob_Cmd *cmd)
 	nob_cc_inputs(cmd, SRC_DIR "pool.c");
 	nob_cc_inputs(cmd, SRC_DIR "chunk.c");
 	nob_cc_inputs(cmd, SRC_DIR "block.c");
+	nob_cc_inputs(cmd, SRC_DIR "core.c");
 	nob_cc_inputs(cmd, SRC_DIR "logs.c");
 	nob_cc_inputs(cmd, SRC_DIR "map.c");
 	nob_cc_inputs(cmd, SRC_DIR "loadopengl.c");
@@ -28,6 +29,7 @@ void linux_glfw_flags(Nob_Cmd *cmd)
 {
 	nob_cmd_append(cmd, "-ggdb");
 	nob_cmd_append(cmd, "-pthread");
+	nob_cmd_append(cmd, "-Wno-unused-function");
 	// nob_cmd_append(cmd, "-DPROFILING");
 	// nob_cmd_append(cmd, "-DNDEBUG");
 	// nob_cmd_append(cmd, "-std=c99");

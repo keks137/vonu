@@ -1,6 +1,7 @@
 #include "block.h"
+#include "core.h"
 #include "disk.h"
-#include <GL/glcorearb.h>
+#include "game.h"
 #include <stdatomic.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -12,8 +13,6 @@
 #include <string.h>
 #include <time.h>
 #include "loadopengl.h"
-#define STB_IMAGE_IMPLEMENTATION
-#include "../vendor/stb_image.h"
 #include "../vendor/cglm/cglm.h"
 #include "image.h"
 #include "chunk.h"
@@ -47,15 +46,6 @@ typedef struct {
 	size_t capacity; // might need multi-buffer operations at some point, preferrably not
 } BlockBuffer; // might also want a ring buffer that processes these guys
 // maybe have logic processing be bound by some kind of power generator that limits the ammount of affected blocks to the buffer size
-
-typedef struct {
-	vec3 pos;
-	vec3 front;
-	vec3 up;
-	float yaw;
-	float pitch;
-	float fov;
-} Camera;
 
 static size_t get_max_threads()
 {
@@ -163,34 +153,6 @@ _Thread_local SpallBuffer spall_buffer;
 // 	__VA_ARGS__
 */
 
-typedef struct {
-	Camera camera;
-	WorldCoord pos;
-	ChunkCoord chunk_pos;
-	bool placing;
-	bool breaking;
-} Player;
-
-typedef struct {
-	ChunkPool pool;
-	OGLPool ogl_pool;
-	ThreadPool thread;
-	RenderMap render_map;
-	MeshQueue mesh;
-	size_t chunk_count;
-	Player player;
-	size_t seed;
-	const char *name;
-	const char *uid;
-} World;
-
-typedef struct {
-	World world;
-	float delta_time;
-	float last_frame;
-	bool paused;
-} GameState;
-
 GameState game_state = { 0 };
 
 // static const vec3 face_normals[6] = {
@@ -202,152 +164,10 @@ GameState game_state = { 0 };
 // 	{ 0, 1, 0 } // TOP
 // };
 
-float movement_speed = 5.0f;
-
 #define ARRAY_LEN(array) (sizeof(array) / sizeof(array[0]))
 
 const char *vertexShaderSource = (char *)verts_vert2;
 const char *fragmentShaderSource = (char *)frags_frag2;
-
-float last_x = 400;
-float last_y = 300;
-typedef struct {
-	bool reset_mouse;
-} MouseState;
-MouseState mouse_state;
-
-static void framebuffer_size_callback(GLFWwindow *window, int width, int height)
-{
-	(void)window;
-	glViewport(0, 0, width, height);
-}
-
-static void set_paused(GLFWwindow *window, bool val)
-{
-	game_state.paused = val;
-	if (game_state.paused) {
-		glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
-	} else {
-		mouse_state.reset_mouse = true;
-		glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
-	}
-}
-
-static void window_focus_callback(GLFWwindow *window, int focused)
-{
-	if (focused == GLFW_TRUE) {
-	} else {
-		set_paused(window, true);
-	}
-}
-
-static void process_input(GLFWwindow *window, Player *player)
-{
-	BEGIN_FUNC();
-	static bool escapeKeyPressedLastFrame = false;
-	static double last_x = 400;
-	static double last_y = 300;
-	static bool reset_mouse = true;
-
-	bool escapeKeyPressedThisFrame = glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS;
-
-	if (escapeKeyPressedThisFrame && !escapeKeyPressedLastFrame) {
-		set_paused(window, !game_state.paused);
-	}
-
-	escapeKeyPressedLastFrame = escapeKeyPressedThisFrame;
-
-	if (game_state.paused) {
-		if (glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS) {
-			set_paused(window, false);
-		}
-		if (glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS) {
-			set_paused(window, false);
-		}
-
-		END_FUNC();
-		return;
-	}
-	double xpos, ypos;
-	glfwGetCursorPos(window, &xpos, &ypos);
-	if (reset_mouse) {
-		last_x = xpos;
-		last_y = ypos;
-		reset_mouse = false;
-	}
-
-	Camera *camera = &player->camera;
-
-	float xoffset = (xpos - last_x) * 0.1f;
-	float yoffset = (last_y - ypos) * 0.1f;
-	last_x = xpos;
-	last_y = ypos;
-
-	camera->yaw += xoffset;
-	camera->pitch += yoffset;
-
-	if (camera->pitch > 89.0f)
-		camera->pitch = 89.0f;
-	if (camera->pitch < -89.0f)
-		camera->pitch = -89.0f;
-
-	vec3 direction = {
-		cos(glm_rad(camera->yaw)) * cos(glm_rad(camera->pitch)),
-		sin(glm_rad(camera->pitch)),
-		sin(glm_rad(camera->yaw)) * cos(glm_rad(camera->pitch))
-	};
-	glm_normalize(direction);
-	glm_vec3_copy(direction, camera->front);
-
-	const float camera_speed = movement_speed * game_state.delta_time;
-	if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS) {
-		camera->pos[1] += camera_speed;
-	}
-	if (glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS) {
-		camera->pos[1] -= camera_speed;
-	}
-	static bool sprinting;
-	float forward_speed = camera_speed;
-	if (glfwGetKey(window, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS) {
-		sprinting = true;
-	}
-	if (sprinting)
-		forward_speed *= 2;
-
-	vec3 horizontal_front;
-	glm_vec3_copy(camera->front, horizontal_front);
-	horizontal_front[1] = 0.0f;
-	glm_normalize(horizontal_front);
-
-	if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) {
-		glm_vec3_muladds(horizontal_front, forward_speed, camera->pos);
-	} else {
-		sprinting = false;
-	}
-
-	if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) {
-		glm_vec3_mulsubs(horizontal_front, camera_speed, camera->pos);
-	}
-	if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) {
-		vec3 right;
-		glm_cross(horizontal_front, camera->up, right);
-		glm_normalize(right);
-		glm_vec3_mulsubs(right, camera_speed, camera->pos);
-	}
-	if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) {
-		vec3 right;
-		glm_cross(horizontal_front, camera->up, right);
-		glm_normalize(right);
-		glm_vec3_muladds(right, camera_speed, camera->pos);
-	}
-	if (glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS) {
-		player->breaking = true;
-	}
-	if (glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS) {
-		player->placing = true;
-	}
-	END_FUNC();
-}
 
 bool verify_shader(unsigned int shader, bool frag)
 {
@@ -395,29 +215,6 @@ bool create_shader_program(unsigned int *shader_program, const char *vertex_shad
 	verify_program(*shader_program);
 	glDeleteShader(vertex_shader);
 	glDeleteShader(fragment_shader);
-	return true;
-}
-
-bool load_image(Image *img, const char *path)
-{
-	int width = 0;
-	int height = 0;
-	int nrChannels = 0;
-	// stbi_set_flip_vertically_on_load(true);
-	FILE *file = fopen(path, "rb");
-	if (file == NULL) {
-		VERROR("Could not open file: %s", path);
-		return false;
-	}
-	unsigned char *data = stbi_load_from_file(file, &width, &height, &nrChannels, 0);
-	fclose(file);
-	img->width = width;
-	img->height = height;
-	img->n_chan = nrChannels;
-	img->data = data;
-	if (data == NULL)
-		return false;
-
 	return true;
 }
 
@@ -627,14 +424,6 @@ static void player_update(Player *player)
 	ChunkCoord new_chunk = world_coord_to_chunk(&player->pos);
 	player->chunk_pos = new_chunk;
 }
-
-typedef struct {
-	GLFWwindow *glfw;
-	int width;
-	int height;
-	InputWorker *worker;
-	InputRing ring;
-} WindowData;
 
 // void print_meshqueue(MeshQueue *mesh)
 // {
@@ -882,11 +671,11 @@ static void world_update(World *world)
 	END_SECT("render req");
 	END_FUNC();
 }
-static void render(GameState *game_state, WindowData window, ShaderData shader_data)
+static void render(GameState *game_state, WindowData *window, ShaderData shader_data)
 {
 	// BEGIN_FUNC();
 	BEGIN_SECT("Buffer Swap");
-	glfwSwapBuffers(window.glfw);
+	platform_swap_buffers(window);
 	END_SECT("Buffer Swap");
 	BEGIN_SECT("Other Stuff");
 	mat4 view;
@@ -897,7 +686,7 @@ static void render(GameState *game_state, WindowData window, ShaderData shader_d
 	glm_lookat(camera->pos, camera_pos_plus_front, camera->up, view);
 
 	mat4 projection = { 0 };
-	float aspect = (float)window.width / (float)window.height;
+	float aspect = (float)window->width / (float)window->height;
 	glm_perspective(glm_rad(camera->fov), aspect, 0.1f, 500.0f, projection);
 
 	glClearColor(0.39f, 0.58f, 0.92f, 1.0f);
@@ -912,92 +701,16 @@ static void render(GameState *game_state, WindowData window, ShaderData shader_d
 	world_render(&game_state->world, shader_data);
 
 	BEGIN_SECT("Poll Events");
-	glfwPollEvents();
+	platform_poll_events();
 	END_SECT("Poll Events");
 	GL_CHECK((void)0);
 	// END_FUNC();
 }
 
-static void glfw_init(WindowData *window, int width, int height)
-{
-	glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
-	glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
-	glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
-	glfwWindowHint(GLFW_DOUBLEBUFFER, GLFW_TRUE);
-	glfwWindowHint(GLFW_DECORATED, GLFW_TRUE);
-
-	if (!glfwInit()) {
-		exit(1);
-	}
-	window->width = width;
-	window->height = height;
-	window->glfw = glfwCreateWindow(window->width, window->height, "Vonu", NULL, NULL);
-
-	if (!window->glfw) {
-		glfwTerminate();
-		exit(1);
-	}
-
-	glfwMakeContextCurrent(window->glfw);
-	glfwSetFramebufferSizeCallback(window->glfw, framebuffer_size_callback);
-	glfwSetInputMode(window->glfw, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
-	glfwSetWindowFocusCallback(window->glfw, window_focus_callback);
-	glfwSwapInterval(0); // no vsync
-}
-
-static void ogl_init(unsigned int *texture)
-{
-	if (!load_gl_functions())
-		exit(1);
-
-	glEnable(GL_DEPTH_TEST);
-	glEnable(GL_DEPTH_CLAMP);
-
-	glGenTextures(1, texture);
-	glBindTexture(GL_TEXTURE_2D, *texture);
-
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-	// glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST_MIPMAP_NEAREST);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-
-	float borderColor[] = { 0.0f, 0.0f, 0.0f, 0.0f };
-	glTexParameterfv(GL_TEXTURE_2D, GL_TEXTURE_BORDER_COLOR, borderColor);
-
-	// glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-	// glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-	// glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST_MIPMAP_NEAREST);
-	// glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-	// glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
-	// glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-	glEnable(GL_CULL_FACE);
-	glCullFace(GL_BACK);
-	// glPolygonMode(GL_FRONT_AND_BACK, GL_LINE); //wireframe
-}
-
-static void assets_init(Image *image_data)
-{
-	if (!load_image(image_data, "assets/atlas.png"))
-		exit(1);
-	GLenum format;
-	if (image_data->n_chan == 3) {
-		format = GL_RGB;
-	} else if (image_data->n_chan == 4) {
-		format = GL_RGBA;
-	} else {
-		format = GL_RGB;
-	}
-
-	glTexImage2D(GL_TEXTURE_2D, 0, format, image_data->width, image_data->height, 0, format, GL_UNSIGNED_BYTE, image_data->data);
-	glGenerateMipmap(GL_TEXTURE_2D);
-	stbi_image_free(image_data->data);
-}
-
 static void shaders_init(ShaderData *shader_data, unsigned int *texture)
 {
-	if (!create_shader_program(&shader_data->program, vertexShaderSource, fragmentShaderSource))
-		exit(1);
+	VASSERT_RELEASE(create_shader_program(&shader_data->program, vertexShaderSource, fragmentShaderSource));
+
 	glUseProgram(shader_data->program);
 	glUniform1i(glGetUniformLocation(shader_data->program, "texture1"), 0);
 	glActiveTexture(GL_TEXTURE0);
@@ -1439,21 +1152,21 @@ static bool input_thread_create(InputWorker *worker)
 	return pthread_create(&worker->handle, NULL, input_thread_func, worker) == 0;
 #endif
 }
+//
+// static void input_ring_init(InputRing *ring, size_t cap)
+// {
+// 	ring->cap = cap;
+// 	ring->events = calloc(ring->cap, sizeof(ring->events[0]));
+// 	VASSERT_RELEASE_MSG(ring->events != NULL, "Buy more RAM");
+// }
+//
+// static void input_system_init(WindowData *window)
+// {
+// 	VASSERT(window->worker == NULL);
+// 	input_ring_init(&window->ring, 4096);
+// }
 
-static void input_ring_init(InputRing *ring, size_t cap)
-{
-	ring->cap = cap;
-	ring->events = calloc(ring->cap, sizeof(ring->events[0]));
-	VASSERT_RELEASE_MSG(ring->events != NULL, "Buy more RAM");
-}
-
-static void input_system_init(WindowData *window)
-{
-	VASSERT(window->worker == NULL);
-	input_ring_init(&window->ring, 4096);
-}
-
-int main()
+int main(int argc, char *argv[])
 {
 #ifdef PROFILING
 	spall_init_file("spall_sample.spall", get_clock_multiplier(), &spall_ctx);
@@ -1472,7 +1185,7 @@ int main()
 	running = true;
 	VINFO("%zu", sizeof(BLOCKTYPE));
 	WindowData window = { 0 };
-	glfw_init(&window, 1600, 900);
+	platform_init(&window, 1600, 900);
 	// input_system_init(&window); // TODO: consider if wanted
 	// glfw_init(&window, 1920, 1080);
 	unsigned int texture;
@@ -1507,18 +1220,21 @@ int main()
 	// VINFO("%i", get_max_threads());
 
 	Player *player = &world->player;
-	while (!glfwWindowShouldClose(window.glfw)) {
+	player->movement_speed = 5.0f;
+	while (!window_should_close(&window)) {
 		BEGIN_SECT("main loop");
-		float current_frame = glfwGetTime();
+		float current_frame = platform_get_time();
 		game_state.delta_time = current_frame - game_state.last_frame;
 		game_state.last_frame = current_frame;
 
 		// VINFO("FPS: %f",1/game_state.delta_time);
 
-		process_input(window.glfw, player);
+		process_input(&window, player);
 
 		if (game_state.paused) {
+#ifndef __ANDROID__
 			glfwWaitEvents();
+#endif //__ANDROID
 			threadpool_pause(&world->thread);
 			END_SECT("main loop");
 			continue;
@@ -1539,7 +1255,7 @@ int main()
 		END_SECT("Bin search");
 		world_update(world);
 
-		render(&game_state, window, shader_data);
+		render(&game_state, &window, shader_data);
 
 		END_SECT("main loop");
 #ifdef PROFILING
@@ -1554,6 +1270,5 @@ int main()
 	spall_quit(&spall_ctx);
 #endif //PROFILING
 
-	glfwDestroyWindow(window.glfw);
-	glfwTerminate();
+	platform_destroy(&window);
 }
