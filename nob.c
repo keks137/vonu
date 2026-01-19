@@ -113,8 +113,9 @@ bool msvc_build(Nob_Cmd *cmd)
 {
 	nob_cmd_append(cmd, "cl");
 	nob_cmd_append(cmd, "/experimental:c11atomics");
+
 	nob_cmd_append(cmd, "/std:c11");
-	nob_cmd_append(cmd, "/W4");
+	// nob_cmd_append(cmd, "/W4");
 	nob_cmd_append(cmd, "/O2");
 	// nob_cmd_append(cmd, "/Zi");
 	nob_cmd_append(cmd, "/I"

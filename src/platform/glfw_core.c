@@ -1,11 +1,3 @@
-#include "../image.h"
-#include "glfw_loadopengl.h"
-#include "../profiling.h"
-#include "../logs.h"
-#include "../game.h"
-#define STB_IMAGE_IMPLEMENTATION
-#include "../../vendor/stb_image.h"
-
 #include <stdlib.h>
 typedef struct {
 	GLFWwindow *glfw;

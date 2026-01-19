@@ -1,10 +1,11 @@
 #ifndef INCLUDE_SRC_THREAD_H_
 #define INCLUDE_SRC_THREAD_H_
 
+#include <stddef.h>
 #include "chunk.h"
 #include "pool.h"
-#include <stddef.h>
 #ifdef _WIN32
+#include <windows.h>
 
 #else
 #include <pthread.h>
