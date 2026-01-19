@@ -1,3 +1,5 @@
+// #version 300 es
+// precision mediump float;
 #version 330 core
 out vec4 FragColor;
   
@@ -8,7 +10,7 @@ in vec3 LightColor;
 
 
 uniform sampler2D texture1;
-uniform vec3 sunDirection = vec3(0.2, 1.0, 0.3);
+// uniform vec3 sunDirection = vec3(0.2, 1.0, 0.3);
 // uniform vec3 lightPos;
 // uniform vec3 lightColor;
 // uniform float lightIntensity;
@@ -19,6 +21,7 @@ uniform vec3 sunDirection = vec3(0.2, 1.0, 0.3);
 void main()
 {
 	vec4 tex = texture(texture1, TexCoord);
+	// vec4 tex = vec4(1.0,1.0,1.0,1.0)
 	vec3 objectColor = tex.rgb;
 
 	// float faceLight = max(dot(normalize(Normal), normalize(sunDirection)), 0.0);

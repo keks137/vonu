@@ -58,6 +58,11 @@ static void handle_cmd(struct android_app *app, int32_t cmd)
 				surface = eglCreateWindowSurface(display, cfg, app->window, NULL);
 				eglMakeCurrent(display, surface, surface, ctx);
 			}
+			EGLint w, h;
+			eglQuerySurface(display, surface, EGL_WIDTH, &w);
+			eglQuerySurface(display, surface, EGL_HEIGHT, &h);
+			VINFO("view w: %i h: %i",w,h);
+			glViewport(0, 0, w, h);
 		}
 	} break;
 	case APP_CMD_TERM_WINDOW: {

@@ -225,22 +225,6 @@ static void print_image_info(Image *image)
 	VINFO("n_chan: %zu", image->n_chan);
 }
 
-#ifdef NDEBUG
-#define GL_CHECK(stmt) \
-	do {           \
-		stmt;  \
-	} while (0)
-#else
-#define GL_CHECK(stmt)                                                                                            \
-	do {                                                                                                      \
-		stmt;                                                                                             \
-		GLenum err = glGetError();                                                                        \
-		if (err != GL_NO_ERROR) {                                                                         \
-			VERROR("OpenGL error 0x%04X at %s:%d: %s: %s", err, __FILE__, __LINE__, __func__, #stmt); \
-		}                                                                                                 \
-	} while (0)
-#endif // NDEBUG
-
 static void chunk_render(OGLPool *pool, Chunk *chunk, ShaderData shader_data)
 {
 #if 0
@@ -254,6 +238,7 @@ static void chunk_render(OGLPool *pool, Chunk *chunk, ShaderData shader_data)
 		// VERROR("This guy again:");
 		return;
 	}
+	// VINFO("drawing");
 
 	BEGIN_FUNC();
 	VASSERT_MSG(chunk->block_count != 0, "How did it get here?");
@@ -345,6 +330,7 @@ static void world_init(World *world)
 	VASSERT_RELEASE_MSG(world->pool.chunk != NULL, "Buy more RAM");
 
 	oglpool_init(&world->ogl_pool, MAX_VISIBLE_CHUNKS * 2);
+	// oglpool_init(&world->ogl_pool, MAX_VISIBLE_CHUNKS * 8);
 	// rendermap_init(&world->render_map, 2 * 2048, 2);
 	rendermap_init(&world->render_map, 1 << 14, 2);
 	// meshqueue_init(&world->mesh, 1024, 1024);
@@ -518,9 +504,16 @@ static void workers_add_new(ThreadPool *thread, const ChunkCoord coord)
 {
 	workerqueue_push_override(&thread->system.mesh_new, (WorkerTask){ coord, NULL, 0 });
 }
+
+static void print_chunkcoord(const ChunkCoord *pos)
+{
+	VINFO("ChunkCoord: x: %i y: %i z: %i", pos->x, pos->y, pos->z);
+}
+
 static void mesh_request(RenderMap *map, ThreadPool *thread, const ChunkCoord *coord)
 {
 	BEGIN_FUNC();
+	// print_chunkcoord(coord);
 	Chunk chunk = { 0 };
 	// TODO: make this scream into the void again
 	if (rendermap_get_chunk(map, &chunk, coord)) {
@@ -541,10 +534,6 @@ static void mesh_request(RenderMap *map, ThreadPool *thread, const ChunkCoord *c
 static void print_blockpos(const BlockPos *pos)
 {
 	VINFO("BlockPos: x: %i y: %i z: %i", pos->x, pos->y, pos->z);
-}
-static void print_chunkcoord(const ChunkCoord *pos)
-{
-	VINFO("ChunkCoord: x: %i y: %i z: %i", pos->x, pos->y, pos->z);
 }
 
 static void meshqueue_chunk_load(ChunkPool *pool, Chunk *chunk, const ChunkCoord *coord, size_t seed)
@@ -589,6 +578,8 @@ static void mesh_upload_chunk(OGLPool *ogl, ChunkVertsScratch *scratch, Chunk *c
 		     scratch->data,
 		     chunk->updates_this_cycle > 2 ? GL_DYNAMIC_DRAW : GL_STATIC_DRAW);
 	chunk->has_vbo_data = true;
+	GL_CHECK((void)0);
+	// print_chunkcoord(&chunk->coord);
 }
 static inline void meshqueue_process_element(MeshUploadData *upd, RenderMap *map, OGLPool *ogl)
 {
@@ -690,7 +681,7 @@ static void render(GameState *game_state, WindowData *window, ShaderData shader_
 	glm_perspective(glm_rad(camera->fov), aspect, 0.1f, 500.0f, projection);
 
 	glClearColor(0.39f, 0.58f, 0.92f, 1.0f);
-	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+	GL_CHECK(glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT));
 
 	glUseProgram(shader_data.program);
 
@@ -1010,6 +1001,8 @@ void threadpool_init(ThreadPool *thread, size_t num_workers, ChunkPool *pool, OG
 	VASSERT_RELEASE_MSG(thread->workers != NULL, "Buy more RAM");
 
 	// workerqueue_init(&thread->, 1024);
+	// meshresourcepool_init(&thread->mesh_resource, 4, 32);
+	// meshresourcepool_init(&thread->mesh_resource, 4, 64);
 	meshresourcepool_init(&thread->mesh_resource, 4, 256);
 	workersystem_init(&thread->system, 256, 256);
 
@@ -1183,7 +1176,7 @@ int main(int argc, char *argv[])
 
 #endif // PROFILING
 	running = true;
-	VINFO("%zu", sizeof(BLOCKTYPE));
+	// VINFO("%zu", sizeof(BLOCKTYPE));
 	WindowData window = { 0 };
 	platform_init(&window, 1600, 900);
 	// input_system_init(&window); // TODO: consider if wanted
@@ -1201,7 +1194,7 @@ int main(int argc, char *argv[])
 		.fov = 90.0f,
 		.yaw = -00.0f,
 		.pitch = 0.0f,
-		.pos = { 0.0f, 30.0f, 000000000.0f },
+		.pos = { 0.0f, 10.0f, 000000000.0f },
 		.up = { 0.0f, 1.0f, 0.0f },
 		.front = { 0.0f, 0.0f, -1.0f },
 	};
@@ -1213,11 +1206,11 @@ int main(int argc, char *argv[])
 		static char *uid = "hi";
 		world->uid = uid;
 	}
-	disk_init(world->uid);
+	//disk_init(world->uid);
 
 	// BlockLight light = color_and_range_to_blocklight((Color){ 255, 255, 0, 1 }, 15);
 	// print_blocklight(light);
-	// VINFO("%i", get_max_threads());
+	VINFO("%i", get_max_threads());
 
 	Player *player = &world->player;
 	player->movement_speed = 5.0f;
@@ -1232,6 +1225,7 @@ int main(int argc, char *argv[])
 		process_input(&window, player);
 
 		if (game_state.paused) {
+			// VINFO("paused");
 #ifndef __ANDROID__
 			glfwWaitEvents();
 #endif //__ANDROID
@@ -1241,7 +1235,7 @@ int main(int argc, char *argv[])
 		}
 		threadpool_resume(&world->thread);
 
-		BEGIN_SECT("Bin search");
+
 		player_update(player);
 
 		if (player->breaking) {
@@ -1252,7 +1246,6 @@ int main(int argc, char *argv[])
 			player_place_block(player, BlocktypeStone, &game_state.world.pool, &game_state.world.ogl_pool, &game_state.world.render_map, &player->pos, world->seed);
 			player->placing = false;
 		}
-		END_SECT("Bin search");
 		world_update(world);
 
 		render(&game_state, &window, shader_data);

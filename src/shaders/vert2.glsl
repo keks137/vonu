@@ -1,3 +1,5 @@
+// #version 300 es
+// precision mediump float;
 #version 330 core
 layout (location = 0) in vec3 aPos;
 layout (location = 1) in vec2 aTexCoord;
@@ -38,7 +40,7 @@ void main()
 	uint g = (aLight >> 4) & 0xFu;
 	uint b = (aLight >> 8) & 0xFu;
 
-	LightLevel = (aLight & 0xFu) / 15.0;
+	LightLevel = float(aLight & 0xFu) / 15.0;
 
 	LightColor = vec3(float(r) / 16.0, float(g) / 16.0, float(b) / 16.0);
 }

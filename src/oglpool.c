@@ -28,6 +28,7 @@ static void vao_attributes(unsigned int VAO)
 			       sizeof(Vertex),
 			       (void *)offsetof(Vertex, light));
 	glEnableVertexAttribArray(3);
+	GL_CHECK((void)0);
 }
 
 static void oglitem_init(OGLPool *pool, OGLItem *item)
@@ -40,6 +41,7 @@ static void oglitem_init(OGLPool *pool, OGLItem *item)
 	vao_attributes(item->VAO);
 
 	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, pool->fullblock_EBO);
+	GL_CHECK((void)0);
 }
 static void oglpool_upload_indeces(OGLPool *pool)
 {

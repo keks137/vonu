@@ -84,4 +84,20 @@ void log_assertion_warn(const char *expression, const char *message, const char 
 
 #define VASSERT_STATIC_NOMSG(expr) VASSERT_STATIC(expr, "static assertion failed")
 
+#ifdef NDEBUG
+#define GL_CHECK(stmt) \
+	do {           \
+		stmt;  \
+	} while (0)
+#else
+#define GL_CHECK(stmt)                                                                                            \
+	do {                                                                                                      \
+		stmt;                                                                                             \
+		GLenum err = glGetError();                                                                        \
+		if (err != GL_NO_ERROR) {                                                                         \
+			VERROR("OpenGL error 0x%04X at %s:%d: %s: %s", err, __FILE__, __LINE__, __func__, #stmt); \
+		}                                                                                                 \
+	} while (0)
+#endif // NDEBUG
+
 #endif // INCLUDE_SRC_ASSERTS_H_
