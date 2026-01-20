@@ -1,5 +1,3 @@
-#include "glfw_loadopengl.h"
-#include "../logs.h"
 #define LOAD_GL_FUNC(type, name)                      \
 	name = (type)glfwGetProcAddress(#name);       \
 	if (!name) {                                  \
