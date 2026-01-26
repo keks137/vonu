@@ -29,7 +29,7 @@ void log_assertion_warn(const char *expression, const char *message, const char 
 #define VUNLIKELY(x) (x)
 #endif
 
-#define VASSERT_RELEASE(expr)                                                             \
+#define VPANIC(expr)                                                                      \
 	do {                                                                              \
 		if (VUNLIKELY(!(expr))) {                                                 \
 			log_assertion_failure(#expr, NULL, __FILE__, __LINE__, __func__); \
@@ -37,7 +37,7 @@ void log_assertion_warn(const char *expression, const char *message, const char 
 		}                                                                         \
 	} while (0)
 
-#define VASSERT_RELEASE_MSG(expr, msg)                                                   \
+#define VPANIC_MSG(expr, msg)                                                            \
 	do {                                                                             \
 		if (VUNLIKELY(!(expr))) {                                                \
 			log_assertion_failure(#expr, msg, __FILE__, __LINE__, __func__); \
@@ -46,8 +46,8 @@ void log_assertion_warn(const char *expression, const char *message, const char 
 	} while (0)
 
 #ifndef NDEBUG
-#define VASSERT(expr) VASSERT_RELEASE(expr)
-#define VASSERT_MSG(expr, msg) VASSERT_RELEASE_MSG(expr, msg)
+#define VASSERT(expr) VPANIC(expr)
+#define VASSERT_MSG(expr, msg) VPANIC_MSG(expr, msg)
 #define VASSERT_WARN(expr)                                                             \
 	do {                                                                           \
 		if (VUNLIKELY(!(expr))) {                                              \
