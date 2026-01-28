@@ -246,7 +246,7 @@ static void chunk_render(OGLPool *pool, Chunk *chunk, ShaderData shader_data)
 	VASSERT_MSG(pool->items[chunk->oglpool_index].references > 0, "How did it get here?");
 	VASSERT_MSG(chunk->face_count > 0, "How did it get here?");
 
-	chunk->unchanged_render_count++;
+	// chunk->unchanged_render_count++;
 
 	GL_CHECK(glUseProgram(shader_data.program));
 	GL_CHECK(glBindVertexArray(pool->items[chunk->oglpool_index].VAO));
@@ -328,7 +328,7 @@ static void world_init(World *world)
 {
 	world->pool.cap = 128;
 	world->pool.chunk = calloc(world->pool.cap, sizeof(Chunk));
-	VASSERT_RELEASE_MSG(world->pool.chunk != NULL, "Buy more RAM");
+	VPANIC_MSG(world->pool.chunk != NULL, "Buy more RAM");
 
 	oglpool_init(&world->ogl_pool, MAX_VISIBLE_CHUNKS * 2);
 	// oglpool_init(&world->ogl_pool, MAX_VISIBLE_CHUNKS * 8);
@@ -541,7 +541,6 @@ static void meshqueue_chunk_load(ChunkPool *pool, Chunk *chunk, const ChunkCoord
 {
 	// TODO: cache
 	// TODO: pull latest from pool
-	chunk->last_used = time(NULL);
 	chunk->coord = *coord;
 	VASSERT(chunk->data != NULL);
 	size_t index;
@@ -569,7 +568,7 @@ static void mesh_upload_chunk(OGLPool *ogl, ChunkVertsScratch *scratch, Chunk *c
 	}
 	VASSERT(chunk->oglpool_index != 0);
 	OGLItem *item = &ogl->items[chunk->oglpool_index];
-	VASSERT_MSG(item->references > 0, "How did it get here?");
+	// VASSERT_MSG(item->references > 0, "How did it get here?");
 
 	glBindVertexArray(item->VAO);
 
@@ -596,8 +595,10 @@ static inline void meshqueue_process_element(MeshUploadData *upd, RenderMap *map
 	} else // TODO: empty map
 		rendermap_add(map, ogl, &chunk);
 
-	if (chunk.oglpool_index != 0)
-		oglpool_release_chunk(ogl, &chunk);
+	if (chunk.oglpool_index != 0) {
+		RenderMapChunk rmchunk = rendermapchunk_from_chunk(&chunk);
+		oglpool_release_chunk(ogl, &rmchunk);
+	}
 }
 void meshqueue_process(size_t max, MeshResourcePool *meshp, RenderMap *map, OGLPool *ogl)
 {
@@ -703,7 +704,7 @@ static void render(GameState *game_state, WindowData *window, ShaderData shader_
 
 static void shaders_init(ShaderData *shader_data, unsigned int *texture)
 {
-	VASSERT_RELEASE(create_shader_program(&shader_data->program, vertexShaderSource, fragmentShaderSource));
+	VPANIC(create_shader_program(&shader_data->program, vertexShaderSource, fragmentShaderSource));
 
 	glUseProgram(shader_data->program);
 	glUniform1i(glGetUniformLocation(shader_data->program, "texture1"), 0);
@@ -811,20 +812,20 @@ static void meshresourcepool_init(MeshResourcePool *pool, size_t max_users, size
 	pool->max_users = max_users;
 	pool->max_uploads = max_uploads;
 	pool->taken = calloc(pool->max_users, sizeof(pool->taken[0]));
-	VASSERT_RELEASE_MSG(pool->taken != NULL, "Buy more RAM");
+	VPANIC_MSG(pool->taken != NULL, "Buy more RAM");
 	pool->involved = calloc(pool->max_users, sizeof(pool->involved[0]) * MESH_CHUNKS_INVOLVED);
-	VASSERT_RELEASE_MSG(pool->involved != NULL, "Buy more RAM");
+	VPANIC_MSG(pool->involved != NULL, "Buy more RAM");
 	pool->blockdata = calloc(pool->max_users, sizeof(pool->blockdata[0]) * CHUNK_TOTAL_BLOCKS * MESH_CHUNKS_INVOLVED);
-	VASSERT_RELEASE_MSG(pool->blockdata != NULL, "Buy more RAM");
+	VPANIC_MSG(pool->blockdata != NULL, "Buy more RAM");
 	pool->upload_status = calloc(pool->max_uploads, sizeof(pool->upload_status[0]));
-	VASSERT_RELEASE_MSG(pool->upload_status != NULL, "Buy more RAM");
+	VPANIC_MSG(pool->upload_status != NULL, "Buy more RAM");
 	pool->upload_data = calloc(pool->max_uploads, sizeof(pool->upload_data[0]));
-	VASSERT_RELEASE_MSG(pool->upload_data != NULL, "Buy more RAM");
+	VPANIC_MSG(pool->upload_data != NULL, "Buy more RAM");
 	for (size_t i = 0; i < pool->max_uploads; i++) {
 		pool->upload_data[i].buf.cap = MAX_VERTICES_PER_CHUNK;
 		pool->upload_data[i].buf.data = calloc(pool->upload_data[i].buf.cap, sizeof(pool->upload_data[i].buf.data[0]));
 
-		VASSERT_RELEASE_MSG(pool->upload_data[i].buf.data != NULL, "Buy more RAM");
+		VPANIC_MSG(pool->upload_data[i].buf.data != NULL, "Buy more RAM");
 	}
 	for (size_t i = 0; i < pool->max_users * MESH_CHUNKS_INVOLVED; i++) {
 		pool->involved[i].data = &pool->blockdata[i * CHUNK_TOTAL_BLOCKS];
@@ -979,7 +980,7 @@ static void workerqueue_init(WorkerQueue *queue, size_t capacity)
 {
 	memset(queue, 0, sizeof(*queue));
 	queue->tasks = calloc(capacity, sizeof(WorkerTask));
-	VASSERT_RELEASE_MSG(queue->tasks != NULL, "Buy more RAM");
+	VPANIC_MSG(queue->tasks != NULL, "Buy more RAM");
 	queue->capacity = capacity;
 
 	// mutex_init(&queue->mutex);
@@ -1001,7 +1002,7 @@ void threadpool_init(ThreadPool *thread, size_t num_workers, ChunkPool *pool, OG
 		thread->num = 1; // fallback to keep logic working
 
 	thread->workers = calloc(thread->num, sizeof(thread->workers[0]));
-	VASSERT_RELEASE_MSG(thread->workers != NULL, "Buy more RAM");
+	VPANIC_MSG(thread->workers != NULL, "Buy more RAM");
 
 	// workerqueue_init(&thread->, 1024);
 	// meshresourcepool_init(&thread->mesh_resource, 4, 32);
@@ -1021,7 +1022,7 @@ void threadpool_init(ThreadPool *thread, size_t num_workers, ChunkPool *pool, OG
 		Worker *w = &thread->workers[i];
 		w->id = i;
 		w->context = thread->shared_context;
-		VASSERT_RELEASE_MSG(thread_create(w), "Thread Creation failed");
+		VPANIC_MSG(thread_create(w), "Thread Creation failed");
 	}
 }
 
@@ -1045,10 +1046,10 @@ static void renderring_init(RenderRing *ring, size_t cap, size_t outdated_cap)
 {
 	ring->cap = cap;
 	ring->items = calloc(ring->cap, sizeof(ring->items[0]));
-	VASSERT_RELEASE_MSG(ring->items != NULL, "Buy more RAM");
+	VPANIC_MSG(ring->items != NULL, "Buy more RAM");
 	ring->outdated_cap = outdated_cap;
 	ring->outdated = calloc(ring->outdated_cap, sizeof(ring->outdated[0]));
-	VASSERT_RELEASE_MSG(ring->outdated != NULL, "Buy more RAM");
+	VPANIC_MSG(ring->outdated != NULL, "Buy more RAM");
 }
 
 static void renderring_update(RenderRing *ring, ChunkCoord player)

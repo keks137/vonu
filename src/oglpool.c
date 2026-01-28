@@ -47,7 +47,7 @@ static void oglpool_upload_indeces(OGLPool *pool)
 {
 	size_t max_indices = MAX_FACES_PER_CHUNK * INDICES_PER_QUAD;
 	uint16_t *all_indices = malloc(max_indices * sizeof(uint16_t));
-	VASSERT_RELEASE_MSG(all_indices != NULL, "Buy more RAM...");
+	VPANIC_MSG(all_indices != NULL, "Buy more RAM...");
 
 	for (size_t i = 0; i < MAX_FACES_PER_CHUNK; i++) {
 		uint16_t base = i * VERTICES_PER_QUAD;
@@ -73,7 +73,7 @@ void oglpool_init(OGLPool *pool, size_t cap)
 	pool->cap = cap;
 	pool->items = calloc(pool->cap, sizeof(pool->items[0]));
 	pool->free_stack = calloc(pool->cap, sizeof(pool->free_stack[0]));
-	VASSERT_RELEASE_MSG(pool->items != NULL, "Buy more RAM...");
+	VPANIC_MSG(pool->items != NULL, "Buy more RAM...");
 
 	oglpool_upload_indeces(pool);
 	for (size_t i = 0; i < pool->cap; i++) {
@@ -127,7 +127,7 @@ bool oglpool_claim_chunk(OGLPool *pool, Chunk *chunk)
 	}
 	return false;
 }
-void oglpool_release_chunk(OGLPool *pool, Chunk *chunk)
+void oglpool_release_chunk(OGLPool *pool, RenderMapChunk *chunk)
 {
 	VASSERT(chunk->oglpool_index != 0);
 	if (chunk->oglpool_index != 0) {
@@ -135,7 +135,7 @@ void oglpool_release_chunk(OGLPool *pool, Chunk *chunk)
 		chunk->oglpool_index = 0;
 	}
 }
-void oglpool_reference_chunk(OGLPool *pool, Chunk *chunk, size_t index)
+void oglpool_reference_chunk(OGLPool *pool, RenderMapChunk *chunk, size_t index)
 {
 	chunk->oglpool_index = index;
 	oglpool_reference(pool, chunk->oglpool_index);

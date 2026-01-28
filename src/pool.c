@@ -1,6 +1,7 @@
 #include "pool.h"
 #include "chunk.h"
 #include "logs.h"
+#include "map.h"
 #include "vassert.h"
 #include <stddef.h>
 #include <string.h>
@@ -37,17 +38,17 @@ size_t pool_append_keep_ogl(ChunkPool *pool, OGLPool *ogl, size_t ogl_index, con
 	Chunk *chunk = &pool->chunk[pool->lvl];
 	chunk_clear_metadata(chunk);
 	chunk_load(chunk, coord, seed);
-	oglpool_reference_chunk(ogl, chunk, ogl_index);
+	// oglpool_reference_chunk(ogl, chunk, ogl_index); // NOTE: it doesnt upload anyways
 	return pool->lvl++;
 }
-void pool_replace_keep_ogl(ChunkPool *pool, OGLPool *ogl, size_t ogl_index, const ChunkCoord *coord, size_t index, size_t seed)
-{
-	VASSERT(pool->lvl > index);
-	Chunk *chunk = &pool->chunk[index];
-	chunk_clear_metadata(chunk);
-	chunk_load(chunk, coord, seed);
-	oglpool_reference_chunk(ogl, chunk, ogl_index);
-}
+// void pool_replace_keep_ogl(ChunkPool *pool, OGLPool *ogl, size_t ogl_index, const ChunkCoord *coord, size_t index, size_t seed)
+// {
+// 	VASSERT(pool->lvl > index);
+// 	Chunk *chunk = &pool->chunk[index];
+// 	chunk_clear_metadata(chunk);
+// 	chunk_load(chunk, coord, seed);
+// 	oglpool_reference_chunk(ogl, chunk, ogl_index);
+// }
 bool pool_find_chunk_coord(ChunkPool *pool, const ChunkCoord *coord, size_t *index)
 {
 	size_t idx;
@@ -82,35 +83,37 @@ bool pool_get_index(ChunkPool *pool, Chunk *chunk, size_t *index)
 size_t pool_replaceable_index(ChunkPool *pool)
 {
 	size_t index = 0;
-	time_t oldest = time(NULL);
+	// time_t oldest = time(NULL);
+	//
+	// for (size_t i = 0; i < pool->lvl; i++) {
+	// 	Chunk *pc = &pool->chunk[i];
+	// 	if (pc->last_used < oldest) {
+	// 		oldest = pc->last_used;
+	// 		index = i;
+	// 	}
+	// }
 
-	for (size_t i = 0; i < pool->lvl; i++) {
-		Chunk *pc = &pool->chunk[i];
-		if (pc->last_used < oldest) {
-			oldest = pc->last_used;
-			index = i;
-		}
-	}
+	index = rand() % pool->lvl;
 
 	return index;
 }
 
-bool pool_add_keep_ogl(ChunkPool *pool, size_t *index, OGLPool *ogl, size_t ogl_index, const ChunkCoord *coord, size_t seed)
-{
-	size_t idx;
-	if (index == NULL)
-		index = &idx;
-
-	if (pool->lvl < pool->cap) {
-		*index = pool_append_keep_ogl(pool, ogl, ogl_index, coord, seed);
-		return true;
-	} else {
-		VWARN("pool full");
-		*index = pool_replaceable_index(pool);
-		pool_replace_keep_ogl(pool, ogl, ogl_index, coord, *index, seed);
-		return true;
-	}
-}
+// bool pool_add_keep_ogl(ChunkPool *pool, size_t *index, OGLPool *ogl, size_t ogl_index, const ChunkCoord *coord, size_t seed)
+// {
+// 	size_t idx;
+// 	if (index == NULL)
+// 		index = &idx;
+//
+// 	if (pool->lvl < pool->cap) {
+// 		*index = pool_append_keep_ogl(pool, ogl, ogl_index, coord, seed);
+// 		return true;
+// 	} else {
+// 		VWARN("pool full");
+// 		*index = pool_replaceable_index(pool);
+// 		pool_replace_keep_ogl(pool, ogl, ogl_index, coord, *index, seed);
+// 		return true;
+// 	}
+// }
 void pool_load_chunk(ChunkPool *pool, OGLPool *ogl, RenderMap *map, const ChunkCoord *pos, Chunk **chunk, size_t seed)
 {
 	size_t index;
@@ -232,9 +235,9 @@ void pool_empty(ChunkPool *pool, OGLPool *ogl, size_t index)
 	// VASSERT_MSG(pool->chunk[index].up_to_date || pool->chunk[index].block_count == 0, "There was no reason to unload this");
 	Chunk *chunk = &pool->chunk[index];
 	if (chunk->oglpool_index != 0)
-		oglpool_release_chunk(ogl, chunk);
+		// oglpool_release_chunk(ogl, chunk);
 
-	pool->lvl--;
+		pool->lvl--;
 	Chunk replacement = pool->chunk[pool->lvl];
 	pool->chunk[pool->lvl].data = pool->chunk[index].data;
 	pool->chunk[index] = replacement;
@@ -268,11 +271,8 @@ bool pool_load(ChunkPool *pool, OGLPool *ogl, RenderMap *map, size_t *index, con
 		return index;
 	}
 	if (rendermap_find(map, coord, index)) {
-		Chunk *old_chunk = &map->entry[map->current_buffer][*index].chunk;
-		if (old_chunk->oglpool_index != 0) {
-			if (pool_add_keep_ogl(pool, index, ogl, old_chunk->oglpool_index, coord, seed))
-				return true;
-		}
+		if (pool_add(pool, index, coord, seed))
+			return true;
 	}
 
 	// TODO: cache disk chunks in hash set

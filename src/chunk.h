@@ -69,9 +69,20 @@ typedef struct {
 	uint64_t updates_this_cycle;
 	uint64_t cycles_since_update;
 	uint64_t cycles_in_pool;
-	uint64_t unchanged_render_count;
-	time_t last_used;
+	// uint64_t unchanged_render_count;
+	// time_t last_used;
 } Chunk;
+typedef struct {
+	ChunkCoord coord;
+	size_t oglpool_index;
+	size_t block_count;
+	size_t face_count;
+	bool up_to_date;
+	// bool has_vbo_data;
+	// uint16_t num_lights;
+	// uint16_t *lighti;
+	// uint64_t unchanged_render_count;
+} RenderMapChunk;
 
 void print_chunk(Chunk *chunk);
 void chunk_free(Chunk *chunk);
@@ -87,7 +98,7 @@ void chunk_generate_terrain(Chunk *chunk, size_t seed);
 
 // avoid circular
 bool oglpool_claim_chunk(OGLPool *pool, Chunk *chunk);
-void oglpool_release_chunk(OGLPool *pool, Chunk *chunk);
-void oglpool_reference_chunk(OGLPool *pool, Chunk *chunk, size_t index);
+void oglpool_release_chunk(OGLPool *pool, RenderMapChunk *chunk);
+void oglpool_reference_chunk(OGLPool *pool, RenderMapChunk *chunk, size_t index);
 
 #endif // INCLUDE_SRC_CHUNK_H_

@@ -7,7 +7,7 @@ Chunk chunk_callocrash()
 {
 	Chunk chunk = { 0 };
 	chunk.data = calloc(CHUNK_TOTAL_BLOCKS, sizeof(Block));
-	VASSERT_RELEASE_MSG(chunk.data != NULL, "Buy more ram for more chunks bozo");
+	VPANIC_MSG(chunk.data != NULL, "Buy more ram for more chunks bozo");
 
 	// chunk_init(&chunk);
 
@@ -54,7 +54,7 @@ void print_chunk(Chunk *chunk)
 	VINFO("Chunk: %p", chunk);
 	VINFO("Data: %p", chunk->data);
 	VINFO("coords: %i %i %i", chunk->coord.x, chunk->coord.y, chunk->coord.z);
-	VINFO("unchanged_render_count: %i", chunk->unchanged_render_count);
+	// VINFO("unchanged_render_count: %i", chunk->unchanged_render_count);
 	VINFO("up_to_date: %s", chunk->up_to_date ? "true" : "false");
 	VINFO("terrain_generated: %s", chunk->terrain_generated ? "true" : "false");
 	VINFO("block_count: %i", chunk->block_count);
@@ -211,7 +211,7 @@ void chunk_clear_metadata(Chunk *chunk)
 }
 void chunk_load(Chunk *chunk, const ChunkCoord *coord, size_t seed)
 {
-	chunk->last_used = time(NULL);
+	// chunk->last_used = time(NULL);
 	chunk->coord = *coord;
 	VASSERT(chunk->data != NULL);
 	memset(chunk->data, 0, sizeof(Block) * CHUNK_TOTAL_BLOCKS);

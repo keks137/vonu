@@ -250,7 +250,7 @@ bool disk_load(Chunk *chunk, const char *world_uid)
 	chunk->block_count = block_count;
 	chunk->terrain_generated = true;
 	chunk->up_to_date = false;
-	chunk->last_used = time(NULL);
+	// chunk->last_used = time(NULL);
 
 	return true;
 }

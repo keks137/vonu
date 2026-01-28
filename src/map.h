@@ -12,7 +12,7 @@ typedef enum {
 } HashMapFlags;
 
 typedef struct {
-	Chunk chunk;
+	RenderMapChunk chunk;
 	uint8_t flags;
 	uint8_t off_by;
 } RenderMapEntry;
@@ -33,8 +33,10 @@ bool rendermap_add_next_buffer(RenderMap *map, OGLPool *pool, Chunk *chunk);
 void rendermap_advance_buffer(RenderMap *map, OGLPool *pool);
 bool rendermap_add(RenderMap *map, OGLPool *pool, Chunk *chunk);
 bool rendermap_find(const RenderMap *map, const ChunkCoord *key, size_t *index);
-bool rendermap_get_chunk(RenderMap *map, Chunk *chunk,const ChunkCoord *key);
+bool rendermap_get_chunk(RenderMap *map, Chunk *chunk, const ChunkCoord *key);
 bool rendermap_remove(RenderMap *map, OGLPool *pool, ChunkCoord *key);
 void rendermap_outdate(RenderMap *map, const ChunkCoord *key);
+Chunk rendermapchunk_to_chunk(RenderMapChunk *rmchunk);
+RenderMapChunk rendermapchunk_from_chunk(Chunk *chunk);
 
 #endif // INCLUDE_SRC_MAP_H_

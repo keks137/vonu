@@ -273,7 +273,7 @@ static void meshworker_chunk_load(ChunkPool *pool, Chunk *chunk, const ChunkCoor
 {
 	// TODO: cache
 	// TODO: pull latest from pool
-	chunk->last_used = time(NULL);
+	// chunk->last_used = time(NULL);
 	chunk->coord = *coord;
 	VASSERT(chunk->data != NULL);
 	size_t index;

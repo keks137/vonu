@@ -54,13 +54,35 @@ bool rendermap_init(RenderMap *map, size_t table_size, size_t num_buffers)
 	return true;
 }
 
+Chunk rendermapchunk_to_chunk(RenderMapChunk *rmchunk)
+{
+	Chunk new_chunk = { 0 };
+	new_chunk.block_count = rmchunk->block_count;
+	new_chunk.coord = rmchunk->coord;
+	new_chunk.face_count = rmchunk->face_count;
+	new_chunk.oglpool_index = rmchunk->oglpool_index;
+	new_chunk.up_to_date = rmchunk->up_to_date;
+	return new_chunk;
+}
+RenderMapChunk rendermapchunk_from_chunk(Chunk *chunk)
+{
+	RenderMapChunk new_chunk = { 0 };
+	new_chunk.block_count = chunk->block_count;
+	new_chunk.coord = chunk->coord;
+	new_chunk.face_count = chunk->face_count;
+	new_chunk.oglpool_index = chunk->oglpool_index;
+	new_chunk.up_to_date = chunk->up_to_date;
+	return new_chunk;
+}
+
 bool rendermap_get_chunk(RenderMap *map, Chunk *chunk, const ChunkCoord *key)
 {
 	BEGIN_FUNC();
 	size_t index;
 	if (rendermap_find(map, key, &index)) {
+		Chunk new_chunk = rendermapchunk_to_chunk(&map->entry[map->current_buffer][index].chunk);
 		// (void)chunk; // shut up clangd
-		*chunk = map->entry[map->current_buffer][index].chunk;
+		*chunk = new_chunk;
 		END_FUNC();
 		return true;
 	}
@@ -82,7 +104,7 @@ static bool rendermap_add_opt(RenderMap *map, OGLPool *pool, Chunk *chunk, size_
 
 		if (entry->flags & HashMapFlagDeleted) {
 			memset(entry, 0, sizeof(*entry));
-			entry->chunk = *chunk;
+			entry->chunk = rendermapchunk_from_chunk(chunk);
 
 			if (chunk->oglpool_index != 0)
 				oglpool_reference_chunk(pool, &entry->chunk, chunk->oglpool_index);
@@ -106,14 +128,14 @@ static bool rendermap_add_opt(RenderMap *map, OGLPool *pool, Chunk *chunk, size_
 						if (entry->chunk.oglpool_index != 0)
 							oglpool_release_chunk(pool, &entry->chunk);
 					}
-					entry->chunk = *chunk;
+					entry->chunk = rendermapchunk_from_chunk(chunk);
 					if (chunk->oglpool_index != 0)
 						oglpool_reference_chunk(pool, &entry->chunk, chunk->oglpool_index);
 
 					return true;
 				}
 			} else {
-				entry->chunk = *chunk;
+				entry->chunk = rendermapchunk_from_chunk(chunk);
 				if (chunk->oglpool_index != 0)
 					oglpool_reference_chunk(pool, &entry->chunk, chunk->oglpool_index);
 				entry->flags |= HashMapFlagOccupied;
