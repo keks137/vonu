@@ -88,7 +88,7 @@ void oglpool_init(OGLPool *pool, size_t cap)
 	pool->free_count--; // ignore first
 	VASSERT(pool->free_count < pool->cap);
 }
-static bool oglpool_claim(OGLPool *pool, size_t *index)
+static bool oglpool_claim(OGLPool *pool, uint32_t *index)
 {
 	if (pool->used >= pool->cap) {
 		VERROR("OGLPool full");
@@ -103,7 +103,7 @@ static bool oglpool_claim(OGLPool *pool, size_t *index)
 	pool->used++;
 	return true;
 }
-static void oglpool_release(OGLPool *pool, size_t index)
+static void oglpool_release(OGLPool *pool, uint32_t index)
 {
 	VASSERT(pool->items[index].references > 0);
 	pool->items[index].references--;
@@ -114,7 +114,7 @@ static void oglpool_release(OGLPool *pool, size_t index)
 		pool->free_count++;
 	}
 }
-void oglpool_reference(OGLPool *pool, size_t index)
+void oglpool_reference(OGLPool *pool, uint32_t index)
 {
 	VASSERT(pool->items[index].references > 0);
 	pool->items[index].references++;

@@ -56,10 +56,10 @@ typedef struct {
 	size_t *lights;
 	size_t light_count;
 	ChunkCoord coord;
-	size_t oglpool_index;
+	uint32_t oglpool_index;
 	// bool has_oglpool_reference;
-	size_t face_count;
-	size_t block_count;
+	uint32_t face_count; // NOTE: probably only needs 16 bit
+	uint16_t block_count;
 	bool up_to_date;
 	bool terrain_generated;
 	bool modified;
@@ -74,9 +74,9 @@ typedef struct {
 } Chunk;
 typedef struct {
 	ChunkCoord coord;
-	size_t oglpool_index;
-	size_t block_count;
-	size_t face_count;
+	uint32_t oglpool_index;
+	uint16_t block_count;
+	uint32_t face_count; // NOTE: probably only needs 16 bit
 	bool up_to_date;
 	// bool has_vbo_data;
 	// uint16_t num_lights;
