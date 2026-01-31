@@ -1,7 +1,7 @@
 #ifndef INCLUDE_SRC_CORE_H_
 #define INCLUDE_SRC_CORE_H_
 
-#include "game.h"
+#include "player.h"
 #include "image.h"
 #include "loadopengl.h"
 

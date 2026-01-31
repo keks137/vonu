@@ -1,3 +1,4 @@
+#include <stdio.h>
 #include <stdlib.h>
 #define NOB_IMPLEMENTATION
 #include "nob.h"
@@ -5,6 +6,8 @@
 #define SRC_DIR "src/"
 #define BUILD_DIR "build/"
 #define BIN_DIR "bin/"
+
+bool hot = false;
 
 void append_source_files(Nob_Cmd *cmd)
 {
@@ -19,6 +22,9 @@ void append_source_files(Nob_Cmd *cmd)
 	nob_cc_inputs(cmd, SRC_DIR "logs.c");
 	nob_cc_inputs(cmd, SRC_DIR "map.c");
 	nob_cc_inputs(cmd, SRC_DIR "loadopengl.c");
+	if (!hot) {
+		nob_cc_inputs(cmd, SRC_DIR "game.c");
+	}
 }
 void linux_mingw_glfw_flags(Nob_Cmd *cmd)
 {
@@ -31,6 +37,7 @@ void linux_glfw_flags(Nob_Cmd *cmd)
 	nob_cmd_append(cmd, "-pthread");
 	nob_cmd_append(cmd, "-Wno-unused-function");
 	// nob_cmd_append(cmd, "-DPROFILING");
+	// nob_cmd_append(cmd, "-DVABORT_DEBUG");
 	// nob_cmd_append(cmd, "-std=c99");
 	// nob_cmd_append(cmd, "-DNDEBUG");
 	// nob_cmd_append(cmd, "-O2");
@@ -74,6 +81,11 @@ bool linux_build(Nob_Cmd *cmd)
 	}
 	nob_cc(cmd);
 	nob_cc_flags(cmd);
+	printf("hi!\n");
+	if (hot) {
+		nob_cmd_append(cmd, "-rdynamic");
+		nob_cmd_append(cmd, "-DHOT_RELOAD");
+	}
 
 	linux_glfw_flags(cmd);
 	// nob_cmd_append(cmd, "-fsanitize=address");
@@ -135,6 +147,13 @@ int main(int argc, char *argv[])
 {
 	NOB_GO_REBUILD_URSELF(argc, argv);
 
+	bool mingw = false;
+	if (argc >= 2) {
+		if (strcmp(argv[1], "hot") == 0)
+			hot = true;
+		if (strcmp(argv[1], "mingw") == 0)
+			mingw = true;
+	}
 	if (!nob_mkdir_if_not_exists(BUILD_DIR))
 		exit(1);
 	if (!nob_mkdir_if_not_exists(BIN_DIR))
@@ -148,8 +167,13 @@ int main(int argc, char *argv[])
 #else
 	if (!linux_build(&cmd))
 		exit(1);
-	if (argc == 2) {
+	if (mingw) {
 		if (!linux_mingw_build(&cmd))
+			exit(1);
+	}
+	if (hot) {
+		nob_cmd_append(&cmd, "./bin/vonu");
+		if (!nob_cmd_run(&cmd))
 			exit(1);
 	}
 #endif

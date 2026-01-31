@@ -1,11 +1,4 @@
 #include <stdlib.h>
-typedef struct {
-	GLFWwindow *glfw;
-	int width;
-	int height;
-	// InputWorker *worker;
-	// InputRing ring;
-} WindowData;
 
 static void framebuffer_size_callback(GLFWwindow *window, int width, int height)
 {

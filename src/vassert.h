@@ -13,8 +13,12 @@
 #endif
 
 #else
-
+#ifdef VABORT_QUICK
+#define VABORT() _Exit(1)
+#else
 #define VABORT() abort()
+#endif //VABORT_QUICK
+
 #endif //VABORT_DEBUG
 
 void log_assertion_failure(const char *expression, const char *message, const char *file, int32_t line, const char *func);
