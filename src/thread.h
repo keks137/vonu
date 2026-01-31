@@ -58,7 +58,7 @@ typedef struct {
 	WorkerQueue mesh_up;
 	WorkerQueue mesh_new;
 	// volatile bool shutdown; //needed for saving on exit
-	volatile bool paused;
+	atomic_bool paused;
 } WorkerSystem;
 typedef struct {
 	ChunkCoord coord;

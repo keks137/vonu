@@ -5,19 +5,6 @@
 #include "vassert.h"
 #include <stddef.h>
 #include <string.h>
-void pool_reserve(ChunkPool *pool)
-{
-	pool->blockdata = realloc(pool->blockdata, sizeof(Block) * (pool->cap) * CHUNK_TOTAL_BLOCKS);
-	VASSERT_MSG(pool->blockdata != NULL, "Buy more ram bozo");
-	Block *start_new_blocks = pool->blockdata + sizeof(Block) * CHUNK_TOTAL_BLOCKS * pool->lvl;
-	memset(start_new_blocks, 0, pool->cap * sizeof(Block) * CHUNK_TOTAL_BLOCKS);
-
-	for (size_t i = 0; i < pool->cap; i++) {
-		Chunk chunk = { 0 };
-		chunk.data = start_new_blocks + i * CHUNK_TOTAL_BLOCKS;
-		pool->chunk[pool->lvl + i] = chunk;
-	}
-}
 size_t pool_append(ChunkPool *pool, const ChunkCoord *coord, size_t seed)
 {
 	VASSERT(pool->lvl < pool->cap);

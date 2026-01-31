@@ -12,17 +12,18 @@ bool hot = false;
 void append_source_files(Nob_Cmd *cmd)
 {
 	nob_cc_inputs(cmd, SRC_DIR "main.c");
-	nob_cc_inputs(cmd, SRC_DIR "oglpool.c");
-	nob_cc_inputs(cmd, SRC_DIR "disk.c");
-	nob_cc_inputs(cmd, SRC_DIR "mesh.c");
-	nob_cc_inputs(cmd, SRC_DIR "pool.c");
-	nob_cc_inputs(cmd, SRC_DIR "chunk.c");
-	nob_cc_inputs(cmd, SRC_DIR "block.c");
-	nob_cc_inputs(cmd, SRC_DIR "core.c");
-	nob_cc_inputs(cmd, SRC_DIR "logs.c");
-	nob_cc_inputs(cmd, SRC_DIR "map.c");
 	nob_cc_inputs(cmd, SRC_DIR "loadopengl.c");
+	nob_cc_inputs(cmd, SRC_DIR "core.c");
+	nob_cc_inputs(cmd, SRC_DIR "init.c");
+	nob_cc_inputs(cmd, SRC_DIR "logs.c");
 	if (!hot) {
+		nob_cc_inputs(cmd, SRC_DIR "oglpool.c");
+		nob_cc_inputs(cmd, SRC_DIR "disk.c");
+		nob_cc_inputs(cmd, SRC_DIR "mesh.c");
+		nob_cc_inputs(cmd, SRC_DIR "pool.c");
+		nob_cc_inputs(cmd, SRC_DIR "chunk.c");
+		nob_cc_inputs(cmd, SRC_DIR "block.c");
+		nob_cc_inputs(cmd, SRC_DIR "map.c");
 		nob_cc_inputs(cmd, SRC_DIR "game.c");
 	}
 }
@@ -81,7 +82,6 @@ bool linux_build(Nob_Cmd *cmd)
 	}
 	nob_cc(cmd);
 	nob_cc_flags(cmd);
-	printf("hi!\n");
 	if (hot) {
 		nob_cmd_append(cmd, "-rdynamic");
 		nob_cmd_append(cmd, "-DHOT_RELOAD");
@@ -171,10 +171,10 @@ int main(int argc, char *argv[])
 		if (!linux_mingw_build(&cmd))
 			exit(1);
 	}
-	if (hot) {
-		nob_cmd_append(&cmd, "./bin/vonu");
-		if (!nob_cmd_run(&cmd))
-			exit(1);
-	}
+	// if (hot) {
+	// 	nob_cmd_append(&cmd, "./bin/vonu");
+	// 	if (!nob_cmd_run(&cmd))
+	// 		exit(1);
+	// }
 #endif
 }

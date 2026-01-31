@@ -32,27 +32,7 @@ static inline bool chunkcoord_match(const ChunkCoord *a, const ChunkCoord *b)
 	return (a->x == b->x) && (a->y == b->y) && (a->z == b->z);
 }
 
-bool rendermap_init(RenderMap *map, size_t table_size, size_t num_buffers)
-{
-	map->table_size = table_size;
-	map->num_buffers = num_buffers;
 
-	map->entry = calloc(num_buffers, sizeof(map->entry[0]));
-	if (map->entry == NULL) {
-		VERROR("Failed to alloc render map entries");
-		abort();
-	}
-
-	for (size_t i = 0; i < num_buffers; i++) {
-		map->entry[i] = calloc(table_size, sizeof(map->entry[0][0]));
-		if (map->entry == NULL) {
-			VERROR("Failed to alloc render map entry: %zu", i);
-			abort();
-		}
-	}
-
-	return true;
-}
 
 Chunk rendermapchunk_to_chunk(RenderMapChunk *rmchunk)
 {

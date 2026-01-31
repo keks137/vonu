@@ -1,10 +1,75 @@
 #include "game.h"
 #include "core.h"
 #include "logs.h"
+#include "mesh.h"
 #include "player.h"
 #include "profiling.h"
 #include "vassert.h"
 
+static void mesh_upload_chunk(OGLPool *ogl, ChunkVertsScratch *scratch, Chunk *chunk)
+{
+	chunk->face_count = scratch->lvl / VERTICES_PER_QUAD;
+
+	VASSERT_WARN(chunk->face_count > 0);
+	if (chunk->face_count == 0) {
+		return;
+	}
+
+	if (chunk->oglpool_index == 0) {
+		if (!oglpool_claim_chunk(ogl, chunk))
+			return;
+	}
+	VASSERT(chunk->oglpool_index != 0);
+	OGLItem *item = &ogl->items[chunk->oglpool_index];
+	// VASSERT_MSG(item->references > 0, "How did it get here?");
+
+	glBindVertexArray(item->VAO);
+
+	glBindBuffer(GL_ARRAY_BUFFER, item->VBO);
+	glBufferData(GL_ARRAY_BUFFER,
+		     scratch->lvl * sizeof(scratch->data[0]),
+		     scratch->data,
+		     chunk->updates_this_cycle > 2 ? GL_DYNAMIC_DRAW : GL_STATIC_DRAW);
+	chunk->has_vbo_data = true;
+	GL_CHECK((void)0);
+	// print_chunkcoord(&chunk->coord);
+}
+static inline void meshqueue_process_element(MeshUploadData *upd, RenderMap *map, OGLPool *ogl)
+{
+	Chunk chunk = { 0 };
+	chunk.up_to_date = true;
+	chunk.block_count = upd->block_count;
+	// print_chunk(&chunk);
+
+	chunk.coord = upd->coord;
+	if (upd->buf.lvl > 0) {
+		mesh_upload_chunk(ogl, &upd->buf, &chunk);
+		rendermap_add(map, ogl, &chunk);
+	} else // TODO: empty map
+		rendermap_add(map, ogl, &chunk);
+
+	if (chunk.oglpool_index != 0) {
+		RenderMapChunk rmchunk = rendermapchunk_from_chunk(&chunk);
+		oglpool_release_chunk(ogl, &rmchunk);
+	}
+}
+void meshqueue_process(size_t max, MeshResourcePool *meshp, RenderMap *map, OGLPool *ogl)
+{
+	BEGIN_FUNC();
+	size_t num_proc = 0;
+	for (size_t i = 0; i < meshp->max_uploads && num_proc < max; i++) {
+		if (meshp->upload_status[i] == UPLOAD_STATUS_READY) {
+			MeshUploadData *upd = &meshp->upload_data[i];
+			// VINFO("i: %zu bc: %zu x: %i y: %i z: %i", i, upd->block_count, upd->coord.x, upd->coord.y, upd->coord.z);
+			meshqueue_process_element(upd, map, ogl);
+			// VINFO("uploaded");
+			meshp->upload_status[i] = UPLOAD_STATUS_FREE;
+			num_proc++;
+		}
+		// VINFO("num_proc: %zu",num_proc);
+	}
+	END_FUNC();
+}
 static void workers_add_new(ThreadPool *thread, const ChunkCoord coord)
 {
 	workerqueue_push_override(&thread->system.mesh_new, (WorkerTask){ coord, NULL, 0 });
@@ -324,4 +389,88 @@ void game_frame(WindowData *window, ShaderData *shader) // TODO: make shaders an
 #ifdef PROFILING
 	spall_buffer_flush(&spall_ctx, &spall_buffer);
 #endif // PROFILING
+}
+
+bool meshuser_try_acquire(MeshResourcePool *pool, MeshUserIndex *index)
+{
+	for (MeshUserIndex i = 0; i < pool->max_users; i++) {
+		bool expected = false;
+		if (atomic_compare_exchange_weak(&pool->taken[i], &expected, true)) {
+			*index = i;
+			return true;
+		}
+	}
+	return false;
+}
+bool meshupload_try_acquire(MeshResourcePool *pool, MeshUploadIndex *index)
+{
+	for (MeshUploadIndex i = 0; i < pool->max_uploads; i++) {
+		size_t expected = UPLOAD_STATUS_FREE;
+		if (atomic_compare_exchange_weak(&pool->upload_status[i], &expected, UPLOAD_STATUS_PROCESSING)) {
+			*index = i;
+			return true;
+		}
+	}
+	return false;
+}
+
+bool workerqueue_pop(WorkerQueue *queue, WorkerTask *task)
+{
+	size_t current_readpos = atomic_load_explicit(&queue->readpos, memory_order_acquire);
+
+	size_t current_writepos = atomic_load_explicit(&queue->writepos, memory_order_acquire);
+	// VINFO("r: %zu w:%zu", current_readpos, current_writepos);
+	if (current_readpos == current_writepos) {
+		return false;
+	}
+
+	size_t next_readpos = (current_readpos + 1) % queue->capacity;
+
+	if (atomic_compare_exchange_weak_explicit((atomic_size_t *)&queue->readpos, &current_readpos, next_readpos, memory_order_release, memory_order_relaxed)) {
+		*task = queue->tasks[current_readpos];
+		return true;
+	}
+	return false;
+}
+
+void threads_frame(Worker *worker)
+{
+	WorkerContext *ctx = &worker->context;
+	MeshResourcePool *meshres = ctx->mesh_resource;
+	WorkerTask task = { 0 };
+	MeshResourceHandle res = { 0 };
+
+	if (!meshs_empty(ctx->system)) {
+		// VINFO("hi");
+		if (meshuser_try_acquire(meshres, &res.user)) {
+			// VINFO("%i", test++);
+			while (meshupload_try_acquire(meshres, &res.up)) {
+				if (workerqueue_pop(&ctx->system->mesh_up, &task)) {
+					// VINFO("hi");
+					meshworker_process_mesh(worker, meshres, &res, &task);
+				} else if (workerqueue_pop(&ctx->system->mesh_new, &task)) {
+					meshworker_process_mesh(worker, meshres, &res, &task);
+				} else {
+					// VINFO("bye");
+					break;
+				}
+				// snooze(1);
+			}
+			meshres->taken[res.user] = false;
+		}
+		snooze(1);
+	} else
+		snooze(1);
+}
+static void print_block(Block *block)
+{
+	VINFO("Block: %p", block);
+	VINFO("BlockType: %s", BlockTypeString[block->type]);
+	VINFO("Obstructing: %s", block->obstructing ? "true" : "false");
+}
+static void player_print_block(Player *player, OGLPool *ogl, RenderMap *map, ChunkPool *pool, size_t seed)
+{
+	Block block = pool_read_block(pool, ogl, map, &player->pos, seed);
+	VINFO("Pos: x: %i, y: %i, z: %i", player->pos.x, player->pos.y, player->pos.z)
+	print_block(&block);
 }

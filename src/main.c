@@ -42,6 +42,48 @@ typedef struct {
 } BlockBuffer; // might also want a ring buffer that processes these guys
 // maybe have logic processing be bound by some kind of power generator that limits the ammount of affected blocks to the buffer size
 
+#ifdef HOT_RELOAD
+GameFrameFn game_frame = NULL;
+ThreadsFrameFn threads_frame = NULL;
+#include <dlfcn.h>
+#define NOB_IMPLEMENTATION
+#include "../nob.h"
+#define SRC_DIR "src/"
+bool game_rebuild(Nob_Cmd *cmd)
+{
+	nob_cmd_append(cmd, "cc");
+	nob_cmd_append(cmd, "-shared");
+	nob_cmd_append(cmd, "-fPIC");
+	nob_cmd_append(cmd, "-Wall");
+	nob_cmd_append(cmd, "-Wextra");
+	nob_cmd_append(cmd, "-o");
+	nob_cmd_append(cmd, "game.so");
+	nob_cc_inputs(cmd, SRC_DIR "oglpool.c");
+	nob_cc_inputs(cmd, SRC_DIR "disk.c");
+	nob_cc_inputs(cmd, SRC_DIR "mesh.c");
+	nob_cc_inputs(cmd, SRC_DIR "pool.c");
+	nob_cc_inputs(cmd, SRC_DIR "chunk.c");
+	nob_cc_inputs(cmd, SRC_DIR "block.c");
+	nob_cc_inputs(cmd, SRC_DIR "map.c");
+	nob_cmd_append(cmd, SRC_DIR "loadopengl.c");
+	nob_cmd_append(cmd, SRC_DIR "game.c");
+	return nob_cmd_run(cmd);
+}
+void get_all_symbols(void *lib)
+{
+	game_frame = dlsym(lib, "game_frame");
+	if (!game_frame) {
+		VFATAL("dlsym: %s", dlerror());
+		exit(1);
+	}
+	threads_frame = dlsym(lib, "threads_frame");
+	if (!threads_frame) {
+		VFATAL("dlsym: %s", dlerror());
+		exit(1);
+	}
+}
+#endif //HOT_RELOAD
+
 static size_t get_max_threads()
 {
 	size_t num_threads = 1;
@@ -250,13 +292,6 @@ static void vec3_assign(vec3 v, float x, float y, float z)
 // 	{ .vertices = { { { 0.5f, 0.5f, 0.5f }, { 1.0f, 1.0f }, FACE_TOP, 0 }, { { 0.5f, 0.5f, -0.5f }, { 1.0f, 0.0f }, FACE_TOP, 0 }, { { -0.5f, 0.5f, -0.5f }, { 0.0f, 0.0f }, FACE_TOP, 0 }, { { -0.5f, 0.5f, -0.5f }, { 0.0f, 0.0f }, FACE_TOP, 0 }, { { -0.5f, 0.5f, 0.5f }, { 0.0f, 1.0f }, FACE_TOP, 0 }, { { 0.5f, 0.5f, 0.5f }, { 1.0f, 1.0f }, FACE_TOP, 0 } } }
 // };
 
-static void print_block(Block *block)
-{
-	VINFO("Block: %p", block);
-	VINFO("BlockType: %s", BlockTypeString[block->type]);
-	VINFO("Obstructing: %s", block->obstructing ? "true" : "false");
-}
-
 static void world_init(World *world)
 {
 	world->pool.cap = 128;
@@ -311,13 +346,6 @@ typedef struct {
 	vec3 direction;
 } Ray;
 
-static void player_print_block(Player *player, OGLPool *ogl, RenderMap *map, ChunkPool *pool, size_t seed)
-{
-	Block block = pool_read_block(pool, ogl, map, &player->pos, seed);
-	VINFO("Pos: x: %i, y: %i, z: %i", player->pos.x, player->pos.y, player->pos.z)
-	print_block(&block);
-}
-
 static void print_chunkcoord(const ChunkCoord *pos)
 {
 	VINFO("ChunkCoord: x: %i y: %i z: %i", pos->x, pos->y, pos->z);
@@ -328,86 +356,21 @@ static void print_blockpos(const BlockPos *pos)
 	VINFO("BlockPos: x: %i y: %i z: %i", pos->x, pos->y, pos->z);
 }
 
-static void meshqueue_chunk_load(ChunkPool *pool, Chunk *chunk, const ChunkCoord *coord, size_t seed)
-{
-	// TODO: cache
-	// TODO: pull latest from pool
-	chunk->coord = *coord;
-	VASSERT(chunk->data != NULL);
-	size_t index;
-	if (pool_get_index(pool, chunk, &index)) {
-		memcpy(chunk->data, pool->chunk[index].data, sizeof(chunk->data[0]) * CHUNK_TOTAL_BLOCKS);
-		chunk->block_count = pool->chunk[index].block_count;
-		// VINFO("copied");
-		return;
-	}
-	chunk_generate_terrain(chunk, seed);
-}
-
-static void mesh_upload_chunk(OGLPool *ogl, ChunkVertsScratch *scratch, Chunk *chunk)
-{
-	chunk->face_count = scratch->lvl / VERTICES_PER_QUAD;
-
-	VASSERT_WARN(chunk->face_count > 0);
-	if (chunk->face_count == 0) {
-		return;
-	}
-
-	if (chunk->oglpool_index == 0) {
-		if (!oglpool_claim_chunk(ogl, chunk))
-			return;
-	}
-	VASSERT(chunk->oglpool_index != 0);
-	OGLItem *item = &ogl->items[chunk->oglpool_index];
-	// VASSERT_MSG(item->references > 0, "How did it get here?");
-
-	glBindVertexArray(item->VAO);
-
-	glBindBuffer(GL_ARRAY_BUFFER, item->VBO);
-	glBufferData(GL_ARRAY_BUFFER,
-		     scratch->lvl * sizeof(scratch->data[0]),
-		     scratch->data,
-		     chunk->updates_this_cycle > 2 ? GL_DYNAMIC_DRAW : GL_STATIC_DRAW);
-	chunk->has_vbo_data = true;
-	GL_CHECK((void)0);
-	// print_chunkcoord(&chunk->coord);
-}
-static inline void meshqueue_process_element(MeshUploadData *upd, RenderMap *map, OGLPool *ogl)
-{
-	Chunk chunk = { 0 };
-	chunk.up_to_date = true;
-	chunk.block_count = upd->block_count;
-	// print_chunk(&chunk);
-
-	chunk.coord = upd->coord;
-	if (upd->buf.lvl > 0) {
-		mesh_upload_chunk(ogl, &upd->buf, &chunk);
-		rendermap_add(map, ogl, &chunk);
-	} else // TODO: empty map
-		rendermap_add(map, ogl, &chunk);
-
-	if (chunk.oglpool_index != 0) {
-		RenderMapChunk rmchunk = rendermapchunk_from_chunk(&chunk);
-		oglpool_release_chunk(ogl, &rmchunk);
-	}
-}
-void meshqueue_process(size_t max, MeshResourcePool *meshp, RenderMap *map, OGLPool *ogl)
-{
-	BEGIN_FUNC();
-	size_t num_proc = 0;
-	for (size_t i = 0; i < meshp->max_uploads && num_proc < max; i++) {
-		if (meshp->upload_status[i] == UPLOAD_STATUS_READY) {
-			MeshUploadData *upd = &meshp->upload_data[i];
-			// VINFO("i: %zu bc: %zu x: %i y: %i z: %i", i, upd->block_count, upd->coord.x, upd->coord.y, upd->coord.z);
-			meshqueue_process_element(upd, map, ogl);
-			// VINFO("uploaded");
-			meshp->upload_status[i] = UPLOAD_STATUS_FREE;
-			num_proc++;
-		}
-		// VINFO("num_proc: %zu",num_proc);
-	}
-	END_FUNC();
-}
+// static void meshqueue_chunk_load(ChunkPool *pool, Chunk *chunk, const ChunkCoord *coord, size_t seed)
+// {
+// 	// TODO: cache
+// 	// TODO: pull latest from pool
+// 	chunk->coord = *coord;
+// 	VASSERT(chunk->data != NULL);
+// 	size_t index;
+// 	if (pool_get_index(pool, chunk, &index)) {
+// 		memcpy(chunk->data, pool->chunk[index].data, sizeof(chunk->data[0]) * CHUNK_TOTAL_BLOCKS);
+// 		chunk->block_count = pool->chunk[index].block_count;
+// 		// VINFO("copied");
+// 		return;
+// 	}
+// 	chunk_generate_terrain(chunk, seed);
+// }
 
 static void shaders_init(ShaderData *shader_data, unsigned int *texture)
 {
@@ -421,19 +384,6 @@ static void shaders_init(ShaderData *shader_data, unsigned int *texture)
 	shader_data->view_loc = glGetUniformLocation(shader_data->program, "view");
 	shader_data->projection_loc = glGetUniformLocation(shader_data->program, "projection");
 	shader_data->model_loc = glGetUniformLocation(shader_data->program, "model");
-}
-
-static void snooze(uint64_t ms)
-{
-#ifdef _WIN32
-	Sleep(ms);
-#else
-	struct timespec ts = {
-		.tv_sec = ms / 1000,
-		.tv_nsec = (ms % 1000) * 1000000
-	};
-	nanosleep(&ts, NULL);
-#endif
 }
 
 bool workerqueue_is_empty(WorkerQueue *queue)
@@ -486,24 +436,6 @@ void workerqueue_push_override(WorkerQueue *queue, WorkerTask task)
 	atomic_thread_fence(memory_order_release);
 	atomic_store_explicit((atomic_size_t *)&queue->writepos, next_writepos, memory_order_release);
 }
-bool workerqueue_pop(WorkerQueue *queue, WorkerTask *task)
-{
-	size_t current_readpos = atomic_load_explicit(&queue->readpos, memory_order_acquire);
-
-	size_t current_writepos = atomic_load_explicit(&queue->writepos, memory_order_acquire);
-	// VINFO("r: %zu w:%zu", current_readpos, current_writepos);
-	if (current_readpos == current_writepos) {
-		return false;
-	}
-
-	size_t next_readpos = (current_readpos + 1) % queue->capacity;
-
-	if (atomic_compare_exchange_weak_explicit((atomic_size_t *)&queue->readpos, &current_readpos, next_readpos, memory_order_release, memory_order_relaxed)) {
-		*task = queue->tasks[current_readpos];
-		return true;
-	}
-	return false;
-}
 
 static void meshresourcepool_init(MeshResourcePool *pool, size_t max_users, size_t max_uploads)
 {
@@ -528,30 +460,6 @@ static void meshresourcepool_init(MeshResourcePool *pool, size_t max_users, size
 	for (size_t i = 0; i < pool->max_users * MESH_CHUNKS_INVOLVED; i++) {
 		pool->involved[i].data = &pool->blockdata[i * CHUNK_TOTAL_BLOCKS];
 	}
-}
-
-bool meshuser_try_acquire(MeshResourcePool *pool, MeshUserIndex *index)
-{
-	for (MeshUserIndex i = 0; i < pool->max_users; i++) {
-		bool expected = false;
-		if (atomic_compare_exchange_weak(&pool->taken[i], &expected, true)) {
-			*index = i;
-			return true;
-		}
-	}
-	return false;
-}
-
-bool meshupload_try_acquire(MeshResourcePool *pool, MeshUploadIndex *index)
-{
-	for (MeshUploadIndex i = 0; i < pool->max_uploads; i++) {
-		size_t expected = UPLOAD_STATUS_FREE;
-		if (atomic_compare_exchange_weak(&pool->upload_status[i], &expected, UPLOAD_STATUS_PROCESSING)) {
-			*index = i;
-			return true;
-		}
-	}
-	return false;
 }
 
 static void light_propagate()
@@ -579,35 +487,14 @@ static void *threads_main(void *arg)
 #endif // PROFILING
 	Worker *worker = (Worker *)arg;
 	WorkerContext *ctx = &worker->context;
-	MeshResourcePool *meshres = ctx->mesh_resource;
-	WorkerTask task = { 0 };
-	MeshResourceHandle res = { 0 };
 	while (running) {
-		if (ctx->system->paused) {
+		atomic_bool paused = atomic_load(&ctx->system->paused);
+		if (paused) {
 			snooze(1);
 			continue;
 		}
-		if (!meshs_empty(ctx->system)) {
-			// VINFO("hi");
-			if (meshuser_try_acquire(meshres, &res.user)) {
-				// VINFO("%i", test++);
-				while (meshupload_try_acquire(meshres, &res.up)) {
-					if (workerqueue_pop(&ctx->system->mesh_up, &task)) {
-						// VINFO("hi");
-						meshworker_process_mesh(worker, meshres, &res, &task);
-					} else if (workerqueue_pop(&ctx->system->mesh_new, &task)) {
-						meshworker_process_mesh(worker, meshres, &res, &task);
-					} else {
-						// VINFO("bye");
-						break;
-					}
-					// snooze(1);
-				}
-				meshres->taken[res.user] = false;
-			}
-			snooze(1);
-		} else
-			snooze(1);
+
+		threads_frame(worker);
 	}
 
 #ifdef PROFILING
@@ -789,20 +676,20 @@ void threadpool_cleanup(ThreadPool *thread)
 	// free(thread->system.mesh_new.tasks);
 }
 
-#ifdef HOT_RELOAD
-GameFrameFn game_frame = NULL;
-#include <dlfcn.h>
-#define NOB_IMPLEMENTATION
-#include "../nob.h"
-bool game_rebuild(Nob_Cmd *cmd)
-{
-	nob_cmd_append(cmd, "cc", "src/loadopengl.c", "src/game.c", "-shared", "-fPIC", "-o", "game.so");
-	return nob_cmd_run(cmd);
-}
-#endif //HOT_RELOAD
-
 int main(int argc, char *argv[])
 {
+#ifdef HOT_RELOAD
+	Nob_Cmd cmd = { 0 };
+	VPANIC(game_rebuild(&cmd));
+	void *game_lib = dlopen("./game.so", RTLD_NOW);
+	if (!game_lib) {
+		VFATAL("dlopen: %s", dlerror());
+		exit(1);
+	}
+	get_all_symbols(game_lib);
+
+	int h_was_down = 0;
+#endif
 #ifdef PROFILING
 	spall_init_file("spall_sample.spall", get_clock_multiplier(), &spall_ctx);
 
@@ -857,43 +744,26 @@ int main(int argc, char *argv[])
 	Player *player = &world->player;
 	player->movement_speed = 5.0f;
 
-#ifdef HOT_RELOAD
-	Nob_Cmd cmd = { 0 };
-	VPANIC(game_rebuild(&cmd));
-	void *game_lib = dlopen("./game.so", RTLD_LAZY);
-	if (!game_lib) {
-		VFATAL("dlopen: %s", dlerror());
-		exit(1);
-	}
-
-	game_frame = dlsym(game_lib, "game_frame");
-	if (!game_frame) {
-		VFATAL("dlsym: %s", dlerror());
-		exit(1);
-	}
-
-	int h_was_down = 0;
-#endif
 	while (!window_should_close(&window)) {
 #ifdef HOT_RELOAD
+		// TODO: add the other threads aswell
 		int h_down = glfwGetKey(window.glfw, GLFW_KEY_H) == GLFW_PRESS;
 		if (h_down && !h_was_down) {
+			threadpool_pause(&world->thread);
 			if (!game_rebuild(&cmd)) {
 				h_was_down = h_down;
+				threadpool_resume(&world->thread);
 				continue;
 			}
 			dlclose(game_lib);
 
-			game_lib = dlopen("./game.so", RTLD_LAZY);
+			game_lib = dlopen("./game.so", RTLD_NOW);
 			if (!game_lib) {
 				VFATAL("dlopen: %s", dlerror());
 				exit(1);
 			}
-			game_frame = dlsym(game_lib, "game_frame");
-			if (!game_frame) {
-				VFATAL("dlsym: %s", dlerror());
-				exit(1);
-			}
+			get_all_symbols(game_lib);
+			threadpool_resume(&world->thread);
 		}
 		h_was_down = h_down;
 #endif // HOT_RELOAD

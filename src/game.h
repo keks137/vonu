@@ -46,19 +46,33 @@ typedef struct {
 
 static inline void threadpool_pause(ThreadPool *pool)
 {
-	pool->system.paused = true;
+	atomic_store(&pool->system.paused, true);
 }
 static inline void threadpool_resume(ThreadPool *pool)
 {
-	pool->system.paused = false;
+	atomic_store(&pool->system.paused, false);
 }
 
 #ifdef HOT_RELOAD
 typedef void (*GameFrameFn)(WindowData *window, ShaderData *shader);
+typedef void (*ThreadsFrameFn)(Worker *worker);
 #else
 void game_frame(WindowData *window, ShaderData *shader);
+void threads_frame(Worker *worker);
 #endif // HOT_RELOAD
 
 extern GameState game_state;
 
+static inline void snooze(uint64_t ms)
+{
+#ifdef _WIN32
+	Sleep(ms);
+#else
+	struct timespec ts = {
+		.tv_sec = ms / 1000,
+		.tv_nsec = (ms % 1000) * 1000000
+	};
+	nanosleep(&ts, NULL);
+#endif
+}
 #endif // INCLUDE_SRC_GAME_H_
