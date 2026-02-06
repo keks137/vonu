@@ -177,5 +177,5 @@ int main(int argc, char *argv[])
 	// 	if (!nob_cmd_run(&cmd))
 	// 		exit(1);
 	// }
-#endif
+#endif //_MSC_VER
 }

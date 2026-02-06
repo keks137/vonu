@@ -6,10 +6,10 @@
 #include "thread.h"
 
 #if defined(_MSC_VER)
-#define EXTERN __declspec(dllexport)
+#define EXPORT __declspec(dllexport)
 #define IMPORT __declspec(dllimport)
 #else
-#define EXTERN __attribute__((visibility("default")))
+#define EXPORT __attribute__((visibility("default")))
 #define IMPORT
 #endif
 

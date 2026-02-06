@@ -192,7 +192,7 @@ _Thread_local SpallBuffer spall_buffer;
 // 	__VA_ARGS__
 */
 
-EXTERN GameState game_state = { 0 };
+GameState game_state = { 0 };
 
 // static const vec3 face_normals[6] = {
 // 	{ 0, 0, -1 }, // BACK

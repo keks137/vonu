@@ -1,4 +1,9 @@
 #include <stdlib.h>
+#ifdef WIN32
+#include <windows.h>
+
+static u64 g_freq;
+#endif // WIN32
 
 static void framebuffer_size_callback(GLFWwindow *window, int width, int height)
 {
@@ -199,6 +204,10 @@ void ogl_init(unsigned int *texture)
 
 void platform_init(WindowData *window, size_t width, size_t height)
 {
+#ifdef WIN32
+	QueryPerformanceFrequency((LARGE_INTEGER *)&g_freq);
+#endif // WIN32
+
 	glfw_init(window, width, height);
 	if (!load_gl_functions())
 		exit(1);
@@ -251,9 +260,7 @@ void assets_init(Image *image_data)
 }
 
 #ifdef WIN32
-#include <windows.h>
 
-static u64 g_freq;
 static void time_init()
 {
 	QueryPerformanceFrequency((LARGE_INTEGER *)&g_freq);
