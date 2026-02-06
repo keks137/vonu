@@ -122,7 +122,7 @@ static void world_render(World *world, ShaderData *shader_data)
 	// if ((world->mesh.writei - world->mesh.readi) != 0)
 	// 	print_meshqueue(&world->mesh);
 	// print_pool(&world->pool);
-	meshqueue_process(1024, &world->thread.mesh_resource, &world->render_map, &world->ogl_pool);
+	meshqueue_process(64, &world->thread.mesh_resource, &world->render_map, &world->ogl_pool);
 
 	for (int y = -RENDER_DISTANCE_Y; y <= RENDER_DISTANCE_Y; y++) {
 		for (int z = -RENDER_DISTANCE_Z; z <= RENDER_DISTANCE_Z; z++) {
@@ -343,27 +343,30 @@ static void player_break_block(ChunkPool *pool, OGLPool *ogl, RenderMap *map, co
 void game_frame(WindowData *window, ShaderData *shader) // TODO: make shaders and assets hot reloadable
 {
 	f64 now = time_now();
-	game_state.delta_time = now - game_state.last_frame;
+	game_state.delta_time = now - game_state.last_input;
 	// VINFO("delta: %f", game_state.delta_time);
 	game_state.acc_input += game_state.delta_time;
+	game_state.last_frame = now;
 	World *world = &game_state.world;
 	Player *player = &game_state.world.player;
 
 	// player->movement_speed = 40.0f;
-	// window->freq = 1.0 / 60.0;
+	window->freq = 1.0 / 60.0;
 	// window->freq = 1.0 / 1000;
+	// window->freq = 0;
 
 	// INPUTS:
 	game_state.acc_input += game_state.delta_time;
-	if (game_state.acc_input > window->freq * 2) {
-		game_state.acc_input = INPUT_FREQ * 2;
+	// VINFO("acc: %f", game_state.acc_input);
+	if (game_state.acc_input > window->freq * 4) {
+		game_state.acc_input = INPUT_FREQ;
 	}
 
-	// VINFO("acc: %f", game_state.acc_input);
 	if (game_state.acc_input >= INPUT_FREQ) {
 		while (game_state.acc_input >= INPUT_FREQ) {
-			// if (now - game_state.last_input > INPUT_FREQ) {
+			game_state.delta_time = now - game_state.last_input;
 			game_state.last_input = now;
+			// if (now - game_state.last_input > INPUT_FREQ) {
 			game_state.acc_input -= INPUT_FREQ;
 			// game_state.acc_input -= input_freq;
 
@@ -404,13 +407,12 @@ void game_frame(WindowData *window, ShaderData *shader) // TODO: make shaders an
 			// VINFO("in");
 		}
 	} else {
-		precise_sleep(INPUT_FREQ * 0.5);
+		// precise_sleep(INPUT_FREQ * 0.5);
 	}
 
 	// RENDERING:
 	// if (now - game_state.last_frame > window->freq) {
-	// 	game_state.last_frame = now;
-	// 	VINFO("frame");
+	// VINFO("frame");
 	render(&game_state, window, shader);
 	// }
 	// BEGIN_SECT("main loop");
@@ -418,9 +420,9 @@ void game_frame(WindowData *window, ShaderData *shader) // TODO: make shaders an
 	f64 frame_end = time_now();
 	f64 frame_time = frame_end - now;
 	f64 target = window->freq;
-	if (frame_time < target)
+	if (frame_time < target) {
 		precise_sleep(target - frame_time);
-
+	}
 	// VINFO("FPS: %f",1/game_state.delta_time);
 
 	// END_SECT("main loop");

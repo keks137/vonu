@@ -126,8 +126,8 @@ void process_input(WindowData *window, Player *player)
 	glm_vec3_copy(direction, camera->front);
 
 	// const float camera_speed = player->movement_speed;
-	const float camera_speed = player->movement_speed * INPUT_FREQ;
-	// const float camera_speed = player->movement_speed * game_state.delta_time;
+	// const float camera_speed = player->movement_speed * INPUT_FREQ;
+	const float camera_speed = player->movement_speed * game_state.delta_time;
 	// const float camera_speed = player->movement_speed * game_state.last_input * INPUT_FREQ;
 	if (glfwGetKey(window->glfw, GLFW_KEY_SPACE) == GLFW_PRESS) {
 		camera->pos[1] += camera_speed;
