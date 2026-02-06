@@ -12,6 +12,9 @@
 #include "platform/glfw_core.h"
 #endif
 
+#define INPUT_FREQ  0.001f
+
+
 // NOTE: consider storing window as global, it can only be on one thread anyways and necessity varies amongst platforms
 void set_paused(WindowData *window, bool val);
 void platform_init(WindowData *window, size_t width, size_t height);

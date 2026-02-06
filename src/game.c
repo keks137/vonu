@@ -342,74 +342,84 @@ static void player_break_block(ChunkPool *pool, OGLPool *ogl, RenderMap *map, co
 
 void game_frame(WindowData *window, ShaderData *shader) // TODO: make shaders and assets hot reloadable
 {
-	const f64 input_freq = 1.0 / 1000.0;
 	f64 now = time_now();
 	game_state.delta_time = now - game_state.last_frame;
+	// VINFO("delta: %f", game_state.delta_time);
 	game_state.acc_input += game_state.delta_time;
 	World *world = &game_state.world;
 	Player *player = &game_state.world.player;
 
-	// player->movement_speed = 5.0f;
+	// player->movement_speed = 40.0f;
+	// window->freq = 1.0 / 60.0;
+	// window->freq = 1.0 / 1000;
 
-
-	// if (game_state.acc_input > 0.25) {
-	// 	game_state.acc_input = input_freq;
-	// }
 	// INPUTS:
-	// while (game_state.acc_input >= input_freq) {
-	if (now - game_state.last_input > input_freq) {
-		game_state.last_input = now;
-		// game_state.acc_input -= input_freq;
-
-		process_input(window, player);
-		window->should_close = WindowShouldClose(window);
-
-		if (game_state.paused) {
-			// VINFO("paused");
-#ifndef __ANDROID__
-			glfwWaitEvents();
-#endif //__ANDROID
-			threadpool_pause(&world->thread);
-			// END_SECT("main loop");
-			return;
-		}
-		threadpool_resume(&world->thread);
-
-		player_update(player);
-
-		BEGIN_SECT("Poll Events");
-		platform_poll_events();
-		END_SECT("Poll Events");
-
-		if (player->breaking) {
-			player_break_block(&game_state.world.pool, &game_state.world.ogl_pool, &game_state.world.render_map, &player->pos, world->seed);
-			player->breaking = false;
-		}
-		if (player->placing) {
-			static bool mwew = false;
-			if (mwew)
-				player_place_block(player, BlocktypeGrass, &game_state.world.pool, &game_state.world.ogl_pool, &game_state.world.render_map, &player->pos, world->seed);
-			else
-				player_place_block(player, BlocktypeStone, &game_state.world.pool, &game_state.world.ogl_pool, &game_state.world.render_map, &player->pos, world->seed);
-			mwew = !mwew;
-			player->placing = false;
-		}
-		world_update(world);
-		// VINFO("in");
-		precise_sleep(input_freq * 0.1);
+	game_state.acc_input += game_state.delta_time;
+	if (game_state.acc_input > window->freq * 2) {
+		game_state.acc_input = INPUT_FREQ * 2;
 	}
-	// else
-	// {
-	// 	precise_sleep(0.1 * input_freq);
-	// }
+
+	// VINFO("acc: %f", game_state.acc_input);
+	if (game_state.acc_input >= INPUT_FREQ) {
+		while (game_state.acc_input >= INPUT_FREQ) {
+			// if (now - game_state.last_input > INPUT_FREQ) {
+			game_state.last_input = now;
+			game_state.acc_input -= INPUT_FREQ;
+			// game_state.acc_input -= input_freq;
+
+			process_input(window, player);
+			window->should_close = WindowShouldClose(window);
+
+			if (game_state.paused) {
+				// VINFO("paused");
+#ifndef __ANDROID__
+				glfwWaitEvents();
+#endif //__ANDROID
+				threadpool_pause(&world->thread);
+				// END_SECT("main loop");
+				return;
+			}
+			threadpool_resume(&world->thread);
+
+			player_update(player);
+
+			BEGIN_SECT("Poll Events");
+			platform_poll_events();
+			END_SECT("Poll Events");
+
+			if (player->breaking) {
+				player_break_block(&game_state.world.pool, &game_state.world.ogl_pool, &game_state.world.render_map, &player->pos, world->seed);
+				player->breaking = false;
+			}
+			if (player->placing) {
+				static bool mwew = false;
+				if (mwew)
+					player_place_block(player, BlocktypeGrass, &game_state.world.pool, &game_state.world.ogl_pool, &game_state.world.render_map, &player->pos, world->seed);
+				else
+					player_place_block(player, BlocktypeStone, &game_state.world.pool, &game_state.world.ogl_pool, &game_state.world.render_map, &player->pos, world->seed);
+				mwew = !mwew;
+				player->placing = false;
+			}
+			world_update(world);
+			// VINFO("in");
+		}
+	} else {
+		precise_sleep(INPUT_FREQ * 0.5);
+	}
 
 	// RENDERING:
-	if (now - game_state.last_frame > window->freq) {
-		game_state.last_frame = now;
-		// VINFO("frame");
-		render(&game_state, window, shader);
-	}
+	// if (now - game_state.last_frame > window->freq) {
+	// 	game_state.last_frame = now;
+	// 	VINFO("frame");
+	render(&game_state, window, shader);
+	// }
 	// BEGIN_SECT("main loop");
+
+	f64 frame_end = time_now();
+	f64 frame_time = frame_end - now;
+	f64 target = window->freq;
+	if (frame_time < target)
+		precise_sleep(target - frame_time);
 
 	// VINFO("FPS: %f",1/game_state.delta_time);
 
@@ -417,6 +427,7 @@ void game_frame(WindowData *window, ShaderData *shader) // TODO: make shaders an
 #ifdef PROFILING
 	spall_buffer_flush(&spall_ctx, &spall_buffer);
 #endif // PROFILING
+	// precise_sleep(INPUT_FREQ * 0.1);
 }
 
 bool meshuser_try_acquire(MeshResourcePool *pool, MeshUserIndex *index)
