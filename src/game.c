@@ -411,7 +411,7 @@ void game_frame(WindowData *window, ShaderData *shader) // TODO: make shaders an
 	} else {
 		// precise_sleep(INPUT_FREQ * 0.5);
 	}
-	VINFO("n_ins: %zu", n_ins);
+	// VINFO("n_ins: %zu", n_ins);
 
 	// RENDERING:
 	// if (now - game_state.last_frame > window->freq) {
