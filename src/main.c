@@ -56,6 +56,8 @@ bool game_rebuild(Nob_Cmd *cmd)
 	nob_cmd_append(cmd, "-fPIC");
 	nob_cmd_append(cmd, "-Wall");
 	nob_cmd_append(cmd, "-Wextra");
+	nob_cmd_append(cmd, "-Wno-unused-function");
+	nob_cmd_append(cmd, "-Wno-unused-parameter");
 	nob_cmd_append(cmd, "-o");
 	nob_cmd_append(cmd, "game.so");
 	nob_cc_inputs(cmd, SRC_DIR "oglpool.c");
@@ -742,7 +744,7 @@ int main(int argc, char *argv[])
 	VINFO("%i", get_max_threads());
 
 	Player *player = &world->player;
-	player->movement_speed = 5.0f;
+	player->movement_speed = 1.0f;
 
 	while (!window.should_close) {
 #ifdef HOT_RELOAD

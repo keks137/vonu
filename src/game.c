@@ -265,7 +265,7 @@ static void world_update(World *world)
 			chunk->cycles_in_pool = 0;
 		}
 
-		if (chunk->cycles_in_pool > 400) {
+		if (chunk->cycles_in_pool > 4000) {
 			if (chunk->modified) {
 				//TODO: add back
 				// disk_save(chunk, world->uid);
@@ -348,6 +348,9 @@ void game_frame(WindowData *window, ShaderData *shader) // TODO: make shaders an
 	game_state.acc_input += game_state.delta_time;
 	World *world = &game_state.world;
 	Player *player = &game_state.world.player;
+
+	// player->movement_speed = 5.0f;
+
 
 	// if (game_state.acc_input > 0.25) {
 	// 	game_state.acc_input = input_freq;

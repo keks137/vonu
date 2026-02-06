@@ -37,6 +37,7 @@ void linux_glfw_flags(Nob_Cmd *cmd)
 	nob_cmd_append(cmd, "-ggdb");
 	nob_cmd_append(cmd, "-pthread");
 	nob_cmd_append(cmd, "-Wno-unused-function");
+	nob_cmd_append(cmd, "-Wno-unused-parameter");
 	// nob_cmd_append(cmd, "-DPROFILING");
 	// nob_cmd_append(cmd, "-DVABORT_DEBUG");
 	// nob_cmd_append(cmd, "-std=c99");
