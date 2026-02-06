@@ -744,7 +744,7 @@ int main(int argc, char *argv[])
 	Player *player = &world->player;
 	player->movement_speed = 5.0f;
 
-	while (!window_should_close(&window)) {
+	while (!window.should_close) {
 #ifdef HOT_RELOAD
 		// TODO: add the other threads aswell
 		int h_down = glfwGetKey(window.glfw, GLFW_KEY_H) == GLFW_PRESS;

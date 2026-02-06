@@ -10,5 +10,8 @@
 #define STB_IMAGE_IMPLEMENTATION
 #include "../vendor/stb_image.h"
 
+#include "types.h"
+
+
 #include "platform/glfw_core.c"
 #endif

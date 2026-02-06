@@ -27,8 +27,10 @@ typedef struct {
 } World;
 typedef struct {
 	World world;
-	float delta_time;
-	float last_frame;
+	f64 delta_time;
+	f64 last_frame;
+	f64 acc_input;
+	f64 last_input;
 	bool paused;
 } GameState;
 

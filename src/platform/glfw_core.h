@@ -1,13 +1,17 @@
 #ifndef INCLUDE_PLATFORM_GLFW_CORE_H_
 #define INCLUDE_PLATFORM_GLFW_CORE_H_
 
+#include <stdbool.h>
+
 typedef struct {
 	GLFWwindow *glfw;
 	int width;
 	int height;
+	bool should_close;
+	f64 freq; 
 } WindowData;
 
-static inline bool window_should_close(WindowData *window)
+static inline bool WindowShouldClose(WindowData *window)
 {
 	return glfwWindowShouldClose(window->glfw);
 }

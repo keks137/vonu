@@ -1,5 +1,6 @@
 #include "game.h"
 #include "core.h"
+#include "types.h"
 #include "logs.h"
 #include "mesh.h"
 #include "player.h"
@@ -9,12 +10,10 @@
 static void mesh_upload_chunk(OGLPool *ogl, ChunkVertsScratch *scratch, Chunk *chunk)
 {
 	chunk->face_count = scratch->lvl / VERTICES_PER_QUAD;
-
 	VASSERT_WARN(chunk->face_count > 0);
 	if (chunk->face_count == 0) {
 		return;
 	}
-
 	if (chunk->oglpool_index == 0) {
 		if (!oglpool_claim_chunk(ogl, chunk))
 			return;
@@ -22,14 +21,10 @@ static void mesh_upload_chunk(OGLPool *ogl, ChunkVertsScratch *scratch, Chunk *c
 	VASSERT(chunk->oglpool_index != 0);
 	OGLItem *item = &ogl->items[chunk->oglpool_index];
 	// VASSERT_MSG(item->references > 0, "How did it get here?");
-
 	glBindVertexArray(item->VAO);
 
 	glBindBuffer(GL_ARRAY_BUFFER, item->VBO);
-	glBufferData(GL_ARRAY_BUFFER,
-		     scratch->lvl * sizeof(scratch->data[0]),
-		     scratch->data,
-		     chunk->updates_this_cycle > 2 ? GL_DYNAMIC_DRAW : GL_STATIC_DRAW);
+	glBufferData(GL_ARRAY_BUFFER, scratch->lvl * sizeof(scratch->data[0]), scratch->data, chunk->updates_this_cycle > 2 ? GL_DYNAMIC_DRAW : GL_STATIC_DRAW);
 	chunk->has_vbo_data = true;
 	GL_CHECK((void)0);
 	// print_chunkcoord(&chunk->coord);
@@ -181,9 +176,6 @@ static void render(GameState *game_state, WindowData *window, ShaderData *shader
 	END_SECT("Other Stuff");
 	world_render(&game_state->world, shader_data);
 
-	BEGIN_SECT("Poll Events");
-	platform_poll_events();
-	END_SECT("Poll Events");
 	GL_CHECK((void)0);
 	// END_FUNC();
 }
@@ -308,6 +300,7 @@ Block blocktype_to_block(BLOCKTYPE type)
 	case BlocktypeGrass:
 		block.obstructing = true;
 		block.type = BlocktypeGrass;
+		block_make_light(&block, (Color){ rand() % 255, rand() % 255, rand() % 255, 1 });
 		break;
 	case BlocktypeStone:
 		block.obstructing = true;
@@ -349,43 +342,75 @@ static void player_break_block(ChunkPool *pool, OGLPool *ogl, RenderMap *map, co
 
 void game_frame(WindowData *window, ShaderData *shader) // TODO: make shaders and assets hot reloadable
 {
+	const f64 input_freq = 1.0 / 1000.0;
+	f64 now = time_now();
+	game_state.delta_time = now - game_state.last_frame;
+	game_state.acc_input += game_state.delta_time;
 	World *world = &game_state.world;
 	Player *player = &game_state.world.player;
-	BEGIN_SECT("main loop");
-	float current_frame = platform_get_time();
-	game_state.delta_time = current_frame - game_state.last_frame;
-	game_state.last_frame = current_frame;
+
+	// if (game_state.acc_input > 0.25) {
+	// 	game_state.acc_input = input_freq;
+	// }
+	// INPUTS:
+	// while (game_state.acc_input >= input_freq) {
+	if (now - game_state.last_input > input_freq) {
+		game_state.last_input = now;
+		// game_state.acc_input -= input_freq;
+
+		process_input(window, player);
+		window->should_close = WindowShouldClose(window);
+
+		if (game_state.paused) {
+			// VINFO("paused");
+#ifndef __ANDROID__
+			glfwWaitEvents();
+#endif //__ANDROID
+			threadpool_pause(&world->thread);
+			// END_SECT("main loop");
+			return;
+		}
+		threadpool_resume(&world->thread);
+
+		player_update(player);
+
+		BEGIN_SECT("Poll Events");
+		platform_poll_events();
+		END_SECT("Poll Events");
+
+		if (player->breaking) {
+			player_break_block(&game_state.world.pool, &game_state.world.ogl_pool, &game_state.world.render_map, &player->pos, world->seed);
+			player->breaking = false;
+		}
+		if (player->placing) {
+			static bool mwew = false;
+			if (mwew)
+				player_place_block(player, BlocktypeGrass, &game_state.world.pool, &game_state.world.ogl_pool, &game_state.world.render_map, &player->pos, world->seed);
+			else
+				player_place_block(player, BlocktypeStone, &game_state.world.pool, &game_state.world.ogl_pool, &game_state.world.render_map, &player->pos, world->seed);
+			mwew = !mwew;
+			player->placing = false;
+		}
+		world_update(world);
+		// VINFO("in");
+		precise_sleep(input_freq * 0.1);
+	}
+	// else
+	// {
+	// 	precise_sleep(0.1 * input_freq);
+	// }
+
+	// RENDERING:
+	if (now - game_state.last_frame > window->freq) {
+		game_state.last_frame = now;
+		// VINFO("frame");
+		render(&game_state, window, shader);
+	}
+	// BEGIN_SECT("main loop");
 
 	// VINFO("FPS: %f",1/game_state.delta_time);
 
-	process_input(window, player);
-
-	if (game_state.paused) {
-		// VINFO("paused");
-#ifndef __ANDROID__
-		glfwWaitEvents();
-#endif //__ANDROID
-		threadpool_pause(&world->thread);
-		END_SECT("main loop");
-		return;
-	}
-	threadpool_resume(&world->thread);
-
-	player_update(player);
-
-	if (player->breaking) {
-		player_break_block(&game_state.world.pool, &game_state.world.ogl_pool, &game_state.world.render_map, &player->pos, world->seed);
-		player->breaking = false;
-	}
-	if (player->placing) {
-		player_place_block(player, BlocktypeStone, &game_state.world.pool, &game_state.world.ogl_pool, &game_state.world.render_map, &player->pos, world->seed);
-		player->placing = false;
-	}
-	world_update(world);
-
-	render(&game_state, window, shader);
-
-	END_SECT("main loop");
+	// END_SECT("main loop");
 #ifdef PROFILING
 	spall_buffer_flush(&spall_ctx, &spall_buffer);
 #endif // PROFILING
