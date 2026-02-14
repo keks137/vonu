@@ -744,7 +744,7 @@ int main(int argc, char *argv[])
 	VINFO("%i", get_max_threads());
 
 	Player *player = &world->player;
-	player->movement_speed = 50.0f;
+	player->movement_speed = 10.0f;
 
 	while (!window.should_close) {
 #ifdef HOT_RELOAD

@@ -300,7 +300,8 @@ static void mesh_compute(MeshQueue *mesh, ChunkPool *pool, ChunkVertsScratch *sc
 				}
 				memset(mesh->involved[i].data, 0, sizeof(Block) * CHUNK_TOTAL_BLOCKS);
 				chunk_clear_metadata(&mesh->involved[i]);
-				meshworker_chunk_load(pool, &mesh->involved[i], coord, seed);
+				ChunkCoord it_chunk = { .x = x, .y = y, .z = z };
+				meshworker_chunk_load(pool, &mesh->involved[i], &it_chunk, seed);
 				i++;
 			}
 
@@ -318,7 +319,7 @@ static void mesh_compute(MeshQueue *mesh, ChunkPool *pool, ChunkVertsScratch *sc
 		}
 	}
 }
- void meshworker_process_mesh(Worker *worker, MeshResourcePool *pool, MeshResourceHandle *res, WorkerTask *task)
+void meshworker_process_mesh(Worker *worker, MeshResourcePool *pool, MeshResourceHandle *res, WorkerTask *task)
 {
 	BEGIN_FUNC();
 	// VINFO("%i %i %i", task->coord.x, task->coord.y, task->coord.z);
