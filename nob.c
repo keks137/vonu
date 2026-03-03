@@ -8,6 +8,7 @@
 #define BIN_DIR "bin/"
 
 bool hot = false;
+bool plat_glfw = true;
 
 void append_source_files(Nob_Cmd *cmd)
 {
@@ -29,12 +30,14 @@ void append_source_files(Nob_Cmd *cmd)
 }
 void linux_mingw_glfw_flags(Nob_Cmd *cmd)
 {
-	nob_cmd_append(cmd, "-ggdb");
+	// nob_cmd_append(cmd, "-ggdb");
+	nob_cmd_append(cmd, "-DPLATFORM_GLFW");
 	nob_cmd_append(cmd, "-DPLATFORM_DESKTOP");
 }
-void linux_glfw_flags(Nob_Cmd *cmd)
+void linux_flags(Nob_Cmd *cmd)
 {
 	nob_cmd_append(cmd, "-ggdb");
+	nob_cmd_append(cmd, "-Ivendor");
 	nob_cmd_append(cmd, "-pthread");
 	nob_cmd_append(cmd, "-Wno-unused-function");
 	nob_cmd_append(cmd, "-Wno-unused-parameter");
@@ -44,11 +47,16 @@ void linux_glfw_flags(Nob_Cmd *cmd)
 	// nob_cmd_append(cmd, "-DNDEBUG");
 	// nob_cmd_append(cmd, "-O2");
 	// nob_cmd_append(cmd, "-O3");
-	// nob_cmd_append(cmd, "-fsanitize=address,undefined"); // soo useful
-	// nob_cmd_append(cmd, "-fsanitize=undefined,thread");
-	nob_cmd_append(cmd, "-DPLATFORM_DESKTOP");
-	nob_cmd_append(cmd, "-D_GLFW_X11");
+	// nob_cmd_append(cmd, "-fsanitize=thread");
+	// nob_cmd_append(cmd, "-fsanitize=address");
+	// nob_cmd_append(cmd, "-fsanitize=undefined");
 	nob_cmd_append(cmd, "-lm");
+}
+void linux_glfw_flags(Nob_Cmd *cmd)
+{
+	nob_cmd_append(cmd, "-DPLATFORM_DESKTOP");
+	nob_cmd_append(cmd, "-DPLATFORM_GLFW");
+	nob_cmd_append(cmd, "-D_GLFW_X11");
 }
 
 bool linux_mingw_build_glfw(Nob_Cmd *cmd)
@@ -66,6 +74,7 @@ bool linux_mingw_build_glfw(Nob_Cmd *cmd)
 bool linux_build_glfw(Nob_Cmd *cmd)
 {
 	nob_cc(cmd);
+	linux_flags(cmd);
 	linux_glfw_flags(cmd);
 	nob_cmd_append(cmd, "-c");
 	nob_cc_inputs(cmd, "vendor/rglfw.c");
@@ -77,10 +86,11 @@ bool linux_build_glfw(Nob_Cmd *cmd)
 }
 bool linux_build(Nob_Cmd *cmd)
 {
-	if (!nob_file_exists(BUILD_DIR "rglfw.o")) {
-		if (!linux_build_glfw(cmd))
-			return false;
-	}
+	if (plat_glfw)
+		if (!nob_file_exists(BUILD_DIR "rglfw.o"))
+			if (!linux_build_glfw(cmd))
+				return false;
+
 	nob_cc(cmd);
 	nob_cc_flags(cmd);
 	if (hot) {
@@ -88,11 +98,13 @@ bool linux_build(Nob_Cmd *cmd)
 		nob_cmd_append(cmd, "-DHOT_RELOAD");
 	}
 
-	linux_glfw_flags(cmd);
-	// nob_cmd_append(cmd, "-fsanitize=address");
-	// nob_cmd_append(cmd, "-fsanitize=undefined");
+	linux_flags(cmd);
+	if (plat_glfw)
+		linux_glfw_flags(cmd);
+
 	append_source_files(cmd);
-	nob_cc_inputs(cmd, BUILD_DIR "rglfw.o");
+	if (plat_glfw)
+		nob_cc_inputs(cmd, BUILD_DIR "rglfw.o");
 	nob_cc_output(cmd, BIN_DIR "vonu");
 	if (!nob_cmd_run(cmd))
 		return false;
@@ -131,10 +143,10 @@ bool msvc_build(Nob_Cmd *cmd)
 	// nob_cmd_append(cmd, "/W4");
 	nob_cmd_append(cmd, "/O2");
 	// nob_cmd_append(cmd, "/Zi");
-	nob_cmd_append(cmd, "/I"
-			    "./vendor");
+	nob_cmd_append(cmd, "/Ivendor");
 	append_source_files(cmd);
 	nob_cmd_append(cmd, "vendor/rglfw.c");
+	nob_cmd_append(cmd, "vendor/miniaudio.c");
 	nob_cmd_append(cmd, "/Fe:bin/vonu.exe");
 	nob_cmd_append(cmd, "/link");
 	nob_cmd_append(cmd, "gdi32.lib");
@@ -154,6 +166,8 @@ int main(int argc, char *argv[])
 			hot = true;
 		if (strcmp(argv[1], "mingw") == 0)
 			mingw = true;
+		if (strcmp(argv[1], "glfw") == 0)
+			plat_glfw = true;
 	}
 	if (!nob_mkdir_if_not_exists(BUILD_DIR))
 		exit(1);

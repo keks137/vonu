@@ -8,12 +8,13 @@
 
 #if __ANDROID__
 #include "platform/android_core.h"
-#else
+#elif defined(PLATFORM_GLFW)
 #include "platform/glfw_core.h"
+#else
+#include "platform/yawl_core.h"
 #endif
 
-#define INPUT_FREQ  0.001f
-
+#define INPUT_FREQ 0.001f
 
 // NOTE: consider storing window as global, it can only be on one thread anyways and necessity varies amongst platforms
 void set_paused(WindowData *window, bool val);

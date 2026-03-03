@@ -1,3 +1,4 @@
+#include "image.h"
 #include "logs.h"
 #include "map.h"
 #include "pool.h"
@@ -5,6 +6,8 @@
 #include "vassert.h"
 #include <stdbool.h>
 #include <string.h>
+#define STB_IMAGE_IMPLEMENTATION
+#include <stb_image.h>
 static void oglpool_upload_indeces(OGLPool *pool)
 {
 	size_t max_indices = MAX_FACES_PER_CHUNK * INDICES_PER_QUAD;
@@ -29,6 +32,34 @@ static void oglpool_upload_indeces(OGLPool *pool)
 
 	free(all_indices);
 }
+void ogl_init(unsigned int *texture)
+{
+	glEnable(GL_DEPTH_TEST);
+	glEnable(GL_DEPTH_CLAMP);
+
+	glGenTextures(1, texture);
+	glBindTexture(GL_TEXTURE_2D, *texture);
+
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	// glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST_MIPMAP_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+
+	float borderColor[] = { 0.0f, 0.0f, 0.0f, 0.0f };
+	glTexParameterfv(GL_TEXTURE_2D, GL_TEXTURE_BORDER_COLOR, borderColor);
+
+	// glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	// glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	// glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST_MIPMAP_NEAREST);
+	// glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	// glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+	// glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glEnable(GL_CULL_FACE);
+	glCullFace(GL_BACK);
+	// glPolygonMode(GL_FRONT_AND_BACK, GL_LINE); //wireframe
+}
+
 static void vao_attributes(unsigned int VAO)
 {
 	glBindVertexArray(VAO);
@@ -121,4 +152,43 @@ void pool_reserve(ChunkPool *pool)
 		chunk.data = start_new_blocks + i * CHUNK_TOTAL_BLOCKS;
 		pool->chunk[pool->lvl + i] = chunk;
 	}
+}
+static bool load_image(Image *img, const char *path)
+{
+	int width = 0;
+	int height = 0;
+	int nrChannels = 0;
+	// stbi_set_flip_vertically_on_load(true);
+	FILE *file = fopen(path, "rb");
+	if (file == NULL) {
+		VERROR("Could not open file: %s", path);
+		return false;
+	}
+	unsigned char *data = stbi_load_from_file(file, &width, &height, &nrChannels, 0);
+	fclose(file);
+	img->width = width;
+	img->height = height;
+	img->n_chan = nrChannels;
+	img->data = data;
+	if (data == NULL)
+		return false;
+
+	return true;
+}
+void assets_init(Image *image_data)
+{
+	if (!load_image(image_data, "assets/atlas.png"))
+		exit(1);
+	GLenum format;
+	if (image_data->n_chan == 3) {
+		format = GL_RGB;
+	} else if (image_data->n_chan == 4) {
+		format = GL_RGBA;
+	} else {
+		format = GL_RGB;
+	}
+
+	glTexImage2D(GL_TEXTURE_2D, 0, format, image_data->width, image_data->height, 0, format, GL_UNSIGNED_BYTE, image_data->data);
+	glGenerateMipmap(GL_TEXTURE_2D);
+	stbi_image_free(image_data->data);
 }

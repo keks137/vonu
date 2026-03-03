@@ -376,9 +376,9 @@ void game_frame(WindowData *window, ShaderData *shader) // TODO: make shaders an
 
 			if (game_state.paused) {
 				// VINFO("paused");
-#ifndef __ANDROID__
+#ifdef PLATFORM_GLFW
 				glfwWaitEvents();
-#endif //__ANDROID
+#endif //PLATFORM_GLFW
 				threadpool_pause(&world->thread);
 				// END_SECT("main loop");
 				return;

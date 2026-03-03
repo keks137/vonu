@@ -6,6 +6,7 @@
 // #define EXTERN extern
 // #endif //LOADOPENGL_LOAD_FUNCTIONS
 
+
 #include <GL/glcorearb.h>
 #include <stdbool.h>
 extern PFNGLVERTEXATTRIBIPOINTERPROC glVertexAttribIPointer;

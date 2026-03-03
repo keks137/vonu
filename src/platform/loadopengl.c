@@ -1,10 +1,4 @@
-#define LOAD_GL_FUNC(type, name)                      \
-	name = (type)glfwGetProcAddress(#name);       \
-	if (!name) {                                  \
-		VERROR("Failed to load %s\n", #name); \
-		return false;                         \
-	}
-
+#include <stddef.h>
 PFNGLVERTEXATTRIBIPOINTERPROC glVertexAttribIPointer = NULL;
 PFNGLUNIFORM1FPROC glUniform1f = NULL;
 PFNGLUNIFORM3FVPROC glUniform3fv = NULL;
